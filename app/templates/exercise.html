@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card wide">
+  <div class="row between">
+    <div>
+      <h2>{{ exercise.name }}</h2>
+      <p><strong>{{ exercise.scenario_type }}</strong> · {{ exercise.business_system }} · {{ exercise.platform }} · {{ exercise.duration_minutes }} minutes</p>
+      <p><code>{{ exercise.package_path }}</code></p>
+    </div>
+    <a class="button" href="/exercises/{{ exercise.id }}/download">Download Package</a>
+  </div>
+</section>
+
+<section class="grid two">
+  <div class="card">
+    <h3>Objectives</h3>
+    <ul>{% for o in exercise.objectives %}<li>{{ o }}</li>{% endfor %}</ul>
+  </div>
+  <div class="card">
+    <h3>Participants</h3>
+    <ul>{% for p in exercise.participants %}<li>{{ p }}</li>{% endfor %}</ul>
+  </div>
+</section>
+
+<section class="card wide">
+  <h3>Facilitator Inject Console</h3>
+  <p>Each stage can have multiple options. The exercise leader chooses which inject or chaos action to trigger.</p>
+  {% for stage, injects in injects_by_stage.items() %}
+    <div class="stage">
+      <h4>{{ stage }}</h4>
+      <div class="inject-grid">
+      {% for inj in injects %}
+        <div class="inject {{ 'done' if inj.triggered else '' }}">
+          <div class="row between"><strong>{{ inj.title }}</strong><span>{{ inj.action_type }}</span></div>
+          <p>{{ inj.description }}</p>
+          <small>Audience: {{ inj.audience }}</small>
+          {% if inj.triggered %}
+            <div class="status">Triggered at {{ inj.triggered_at }}</div>
+          {% else %}
+            <form action="/injects/{{ inj.id }}/trigger" method="post"><button class="button primary" type="submit">Trigger Inject</button></form>
+          {% endif %}
+        </div>
+      {% endfor %}
+      </div>
+    </div>
+  {% endfor %}
+</section>
+
+<section class="grid two">
+  <div class="card">
+    <h3>Add Facilitator Note</h3>
+    <form action="/exercises/{{ exercise.id }}/events" method="post">
+      <label>Title</label><input name="title" required>
+      <label>Detail</label><textarea name="detail" rows="4" required></textarea>
+      <button class="button" type="submit">Add Note</button>
+    </form>
+  </div>
+  <div class="card">
+    <h3>Run Log</h3>
+    {% for e in events %}
+      <div class="mini"><strong>{{ e['title'] }}</strong><br><span>{{ e['event_type'] }} · {{ e['created_at'] }}</span><pre>{{ e['detail'] }}</pre></div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

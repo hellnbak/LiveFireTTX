@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <h2>Build scenario-specific live-fire TTX labs</h2>
+  <p>Create a target environment, safe chaos environment, inject timeline, and facilitator console for cyber incident response and disaster recovery exercises.</p>
+  <a class="button primary" href="/new">Create Exercise</a>
+</section>
+
+<section class="grid two">
+  <div class="card">
+    <h3>Scenario Library</h3>
+    {% for key, s in scenarios.items() %}
+      <div class="mini"><strong>{{ s.label }}</strong><br><span>{{ s.description }}</span></div>
+    {% endfor %}
+  </div>
+  <div class="card">
+    <h3>Recent Exercises</h3>
+    {% if exercises %}
+      {% for ex in exercises %}
+        <div class="mini"><a href="/exercises/{{ ex.id }}"><strong>{{ ex.name }}</strong></a><br><span>{{ ex.scenario_type }} · {{ ex.business_system }} · {{ ex.created_at }}</span></div>
+      {% endfor %}
+    {% else %}
+      <p>No exercises yet.</p>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card wide">
+  <h2>Create a LiveFireTTX Exercise</h2>
+  <form action="/exercises" method="post">
+    <label>Exercise name</label>
+    <input name="name" value="Ransomware impacting order processing" required>
+
+    <label>Scenario type</label>
+    <select name="scenario_type">
+      {% for key, s in scenarios.items() %}<option value="{{ key }}">{{ s.label }}</option>{% endfor %}
+    </select>
+
+    <label>Platform</label>
+    <select name="platform"><option value="local_docker">Local Docker</option><option value="aws_future" disabled>AWS - future renderer</option><option value="kubernetes_future" disabled>Kubernetes - future renderer</option></select>
+
+    <label>Business system</label>
+    <input name="business_system" value="Order Processing">
+
+    <label>Difficulty</label>
+    <select name="difficulty"><option>beginner</option><option selected>intermediate</option><option>advanced</option></select>
+
+    <label>Duration minutes</label>
+    <input name="duration_minutes" type="number" value="90">
+
+    <label>Participants, comma separated</label>
+    <input name="participants" value="Incident Commander, Security Operations, Cloud/IT Operations, Communications, Business Owner">
+
+    <label>Objectives, one per line. Leave blank for scenario defaults.</label>
+    <textarea name="objectives" rows="5"></textarea>
+
+    <button class="button primary" type="submit">Generate Exercise</button>
+  </form>
+</div>
+{% endblock %}

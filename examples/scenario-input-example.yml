@@ -1,0 +1,18 @@
+name: Ransomware impacting order processing
+scenario_type: ransomware
+platform: local_docker
+business_system: Order Processing
+difficulty: intermediate
+duration_minutes: 90
+participants:
+  - Incident Commander
+  - Security Operations
+  - Cloud/IT Operations
+  - Communications
+  - Business Owner
+objectives:
+  - detect suspicious behavior
+  - declare incident severity
+  - contain affected service
+  - validate backups
+  - coordinate legal and communications decisions

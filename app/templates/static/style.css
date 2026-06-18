@@ -1,0 +1,25 @@
+:root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #111827; background: #f3f4f6; }
+body { margin: 0; }
+header { background: #111827; color: white; padding: 22px 36px; display:flex; justify-content:space-between; align-items:center; }
+header h1 { margin:0; font-size: 26px; } header p { margin: 4px 0 0; color:#d1d5db; } header a { color:white; text-decoration:none; }
+main { max-width: 1180px; margin: 28px auto; padding: 0 20px; }
+.hero, .card { background:white; border-radius: 18px; padding: 24px; box-shadow: 0 10px 30px rgba(17,24,39,.08); margin-bottom: 20px; }
+.hero h2 { font-size: 34px; margin: 0 0 8px; }
+.grid { display:grid; gap: 20px; } .two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.wide { width: auto; }
+.button { display:inline-block; border:0; background:#e5e7eb; color:#111827; padding: 10px 14px; border-radius: 12px; text-decoration:none; cursor:pointer; font-weight:700; }
+.primary { background:#dc2626; color:white; }
+form { display:grid; gap: 10px; } input, select, textarea { padding: 12px; border: 1px solid #d1d5db; border-radius: 12px; font: inherit; }
+label { font-weight:700; margin-top: 8px; }
+.mini { border:1px solid #e5e7eb; border-radius: 14px; padding: 12px; margin: 10px 0; background:#fafafa; }
+.mini span, small { color:#6b7280; }
+.row { display:flex; gap: 14px; align-items:center; } .between { justify-content:space-between; }
+.stage { border-top: 1px solid #e5e7eb; padding-top: 12px; margin-top: 18px; }
+.inject-grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.inject { border:1px solid #d1d5db; border-radius:16px; padding:16px; background:#fff; }
+.inject.done { background:#ecfdf5; border-color:#10b981; }
+.status { margin-top: 10px; font-weight:700; color:#047857; }
+pre { white-space: pre-wrap; background:#111827; color:#e5e7eb; border-radius: 12px; padding: 10px; overflow:auto; }
+code { background:#f3f4f6; padding:2px 6px; border-radius:6px; }
+ul { margin-top: 8px; }
+@media (max-width: 800px) { .two, .inject-grid { grid-template-columns: 1fr; } header { align-items:flex-start; gap: 12px; flex-direction:column; } }
