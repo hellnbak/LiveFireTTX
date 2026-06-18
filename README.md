@@ -131,8 +131,4 @@ LiveFireTTX is licensed under the Functional Source License, Version 1.1, ALv2 F
 
 Copyright (c) 2026 Steve Manzuik.
 
-See [LICENSE](LICENSE) and consult counsel before relying on this license for commercial use.
-
-## Public release checklist
-
-Before making the repository public, review [docs/PUBLIC_RELEASE_CHECKLIST.md](docs/PUBLIC_RELEASE_CHECKLIST.md).
+See [LICENSE](LICENSE)
