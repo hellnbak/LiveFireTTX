@@ -20,7 +20,13 @@
     <h3>Recent Exercises</h3>
     {% if exercises %}
       {% for ex in exercises %}
-        <div class="mini"><a href="/exercises/{{ ex.id }}"><strong>{{ ex.name }}</strong></a><br><span>{{ ex.scenario_type }} · {{ ex.business_system }} · {{ ex.created_at }}</span></div>
+        <div class="mini">
+          <div class="row between">
+            <a href="/exercises/{{ ex.id }}"><strong>{{ ex.name }}</strong></a>
+            <span class="pill clock-status {{ ex.status }}">{{ ex.status|replace('_', ' ') }}</span>
+          </div>
+          <span>{{ ex.scenario_type }} · {{ ex.business_system }} · {{ ex.created_at }}</span>
+        </div>
       {% endfor %}
     {% else %}
       <p>No exercises yet.</p>

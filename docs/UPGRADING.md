@@ -1,5 +1,17 @@
 # Upgrading
 
+## From v1.0 to v1.1
+
+1. Stop the facilitator application and create a backup.
+2. Install v1.1 with Python 3.11 or newer.
+3. Start the application once. Schema migration 3 adds nullable clock and
+   schedule fields without changing existing exercise packages or evidence.
+4. Existing exercises remain in `created` state with no schedules. Configure
+   narrative timing from each exercise command center.
+5. Newly generated exercises include automatic T+0 and T+20 narrative injects.
+   Set `LIVEFIRE_SCHEDULER_ENABLED=false` before startup to retain manual-only
+   delivery.
+
 ## From v0.6 to v1.0
 
 1. Stop the facilitator application and generated Docker environments.

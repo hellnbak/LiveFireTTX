@@ -64,11 +64,21 @@
   and generated Docker lifecycle smoke tests
 - Upgrade, configuration, threat-model, and release-checklist documentation
 
-## Next: v1.1
+## v1.1 Facilitator Operations
 
-- Facilitator clock, scheduled narrative injects, and exercise pause/resume
+- Persistent facilitator clock with start, pause, resume, complete, and reset
+- Scheduled narrative injects with automatic and facilitator-prompt delivery
+- Default opening and executive-pressure schedules for generated exercises
+- Live command-center progress, remaining time, overtime, and due-state cues
+- Configurable local scheduler with atomic delivery evidence
+
+## Next: v1.2 Portable Exercise Design
+
 - Scenario-pack import/export independent of generated exercise instances
 - More detailed role permissions and observer-only views
+
+## Next: v1.3 Evidence and Experience
+
 - Signed evidence manifests and configurable retention
 - Browser-driven accessibility and end-to-end UI regression tests
 
@@ -80,4 +90,4 @@
 - Multi-user authentication and organization workspaces
 - Shared versioned scenario library
 
-Cloud and enterprise work does not weaken the v1.0 local safety boundary.
+Cloud and enterprise work does not weaken the v1 local safety boundary.

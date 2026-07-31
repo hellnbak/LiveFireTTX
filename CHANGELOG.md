@@ -2,6 +2,28 @@
 
 All notable changes to LiveFireTTX are documented here.
 
+## 1.1.0 - 2026-07-31
+
+### Added
+
+- Facilitator exercise clock with start, pause, resume, complete, and reset
+  controls
+- Scheduled narrative injects with facilitator-prompt and automatic-delivery
+  modes
+- Atomic scheduled delivery events and duplicate-dispatch protection
+- Live elapsed, remaining, overtime, and progress indicators in the command
+  center
+- Configurable scheduler enablement and polling interval
+- Exercise clock metadata in after-action reports and evidence manifests
+
+### Changed
+
+- New exercises include automatic T+0 opening and T+20 executive narrative
+  injects
+- Recent exercise cards expose their current lifecycle state
+- SQLite schema version 3 retains clock and inject schedule state across restarts
+- Docker Compose passes through scheduler enablement and polling configuration
+
 ## 1.0.0 - 2026-07-30
 
 ### Added

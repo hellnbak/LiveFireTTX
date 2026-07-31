@@ -11,6 +11,8 @@ LiveFireTTX reads configuration from environment variables at process startup.
 | `LIVEFIRE_CONTROL_URL` | `http://127.0.0.1:8090` | Must use an approved local origin |
 | `LIVEFIRE_ALLOW_CONTAINER_HOST` | `false` | Allows the exact `host.docker.internal` controller origin |
 | `LIVEFIRE_REQUEST_TIMEOUT_SECONDS` | `3` | Positive integer |
+| `LIVEFIRE_SCHEDULER_ENABLED` | `true` | Boolean controlling automatic narrative delivery |
+| `LIVEFIRE_SCHEDULER_INTERVAL_SECONDS` | `2` | Positive polling interval in seconds |
 
 Generated package deployment also accepts:
 
@@ -31,6 +33,18 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000
 The three specific storage variables override paths derived from
 `LIVEFIRE_DATA_ROOT` when set.
 
+The scheduler only delivers narrative injects explicitly marked for automatic
+delivery. Pausing an exercise freezes elapsed exercise time and prevents new
+scheduled deliveries until the clock resumes. Disabling the scheduler retains
+schedules and due-state prompts for manual facilitator delivery.
+
+The application Compose service passes both scheduler variables through from
+the host environment. For example, start in manual-only mode with:
+
+```bash
+LIVEFIRE_SCHEDULER_ENABLED=false docker compose up -d --build
+```
+
 ## Operational Endpoints
 
 - `GET /healthz` verifies the application process.
@@ -38,6 +52,6 @@ The three specific storage variables override paths derived from
 - `GET /admin/backup.zip` downloads a consistent local backup.
 
 The application does not provide arbitrary remote-controller configuration in
-v1.0. The container-only host bridge is disabled unless
+v1. The container-only host bridge is disabled unless
 `LIVEFIRE_ALLOW_CONTAINER_HOST=true`; it permits only the exact
 `host.docker.internal` hostname over HTTP.

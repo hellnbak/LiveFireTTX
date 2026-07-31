@@ -6,6 +6,8 @@ services:
     environment:
       LIVEFIRE_ALLOW_CONTAINER_HOST: "true"
       LIVEFIRE_CONTROL_URL: "http://host.docker.internal:${LIVEFIRE_CONTROL_HOST_PORT:-8090}"
+      LIVEFIRE_SCHEDULER_ENABLED: "${LIVEFIRE_SCHEDULER_ENABLED:-true}"
+      LIVEFIRE_SCHEDULER_INTERVAL_SECONDS: "${LIVEFIRE_SCHEDULER_INTERVAL_SECONDS:-2}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

@@ -1,6 +1,6 @@
 # LiveFireTTX Architecture
 
-LiveFireTTX v1.0 is intentionally local-first. The facilitator application uses
+LiveFireTTX v1.1 is intentionally local-first. The facilitator application uses
 FastAPI, Jinja2, SQLite, and filesystem-backed generated packages. Every
 exercise receives a separate Docker Compose target and chaos controller bound
 to localhost.
@@ -24,7 +24,7 @@ Guided scenario preset
 ### Configuration
 
 `app/config.py` resolves database, generated-package, backup, controller, and
-timeout settings. The v1.0 controller URL is restricted to localhost.
+timeout settings. The v1 controller URL is restricted to localhost.
 
 ### Persistence
 
@@ -70,6 +70,19 @@ coverage, run lifecycles, playbook outcomes, observations, and artifacts.
 Impact comparison includes application, access, payment, queue, storage,
 third-party, and telemetry signals. Facilitators—not the application—determine
 whether objectives were achieved.
+
+### Facilitator Operations
+
+SQLite schema version 3 persists the exercise lifecycle clock, accumulated
+pause time, completion time, narrative schedules, and automatic-delivery mode.
+`app/services/facilitator.py` owns clock transitions, elapsed-time calculation,
+schedule state, and atomic due-inject delivery. A configurable local scheduler
+polls running exercises; pause and completion states block new deliveries.
+
+The command center reconciles its one-second browser clock against server
+snapshots returned with live controller status. Every clock transition,
+schedule edit, and automatic delivery is also written to the exercise event
+log for after-action evidence.
 
 ## Generated Dependency Target
 
@@ -126,4 +139,4 @@ operator-selected output paths.
 ## Future Renderers
 
 Cloud and enterprise renderers remain adapters around the stable scenario and
-evidence model. They are not part of the v1.0 local safety contract.
+evidence model. They are not part of the v1 local safety contract.

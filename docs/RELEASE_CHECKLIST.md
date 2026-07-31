@@ -1,4 +1,4 @@
-# v1.0 Release Checklist
+# v1.1 Release Checklist
 
 ## Code and Data
 
@@ -24,6 +24,9 @@
 - [ ] Playbook validation, safety budgets, pause/resume/skip/stop, and replay work.
 - [ ] Dependency map changes to degraded and returns to healthy after reset.
 - [ ] Emergency stop ends all active actions and playbooks.
+- [ ] Clock start, pause, resume, complete, and reset transitions retain time.
+- [ ] Due narrative injects deliver once and pause with exercise time.
+- [ ] Scheduler-disabled startup retains schedules for manual delivery.
 - [ ] Evidence and after-action exports open successfully.
 - [ ] Cleanup removes generated Docker resources.
 
@@ -32,6 +35,7 @@
 - [ ] README quick start succeeds on a clean host.
 - [ ] Configuration and upgrade guides match actual behavior.
 - [ ] Safety and threat-model reviews are current.
+- [ ] Release security review covers the v1.1 scheduler and lifecycle delta.
 - [ ] Dependency and secret scanning show no unaccepted release blocker.
 - [ ] Documented security exceptions still match upstream package constraints.
 - [ ] No open critical or high-severity defects remain.
@@ -39,6 +43,6 @@
 ## Publication
 
 - [ ] Merge the release branch.
-- [ ] Create signed tag `v1.0.0`.
+- [ ] Create signed tag `v1.1.0`.
 - [ ] Confirm the release workflow publishes source and wheel artifacts.
 - [ ] Publish release notes and known limitations.

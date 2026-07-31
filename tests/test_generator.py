@@ -21,7 +21,7 @@ class GeneratedPackageTests(TestCase):
                 "app.services.generator.GENERATED_ROOT",
                 Path(temporary),
             ):
-                exercise, _ = create_exercise_from_request(
+                exercise, injects = create_exercise_from_request(
                     ExerciseCreate(
                         name="Role defaults",
                         scenario_type="dependency_cascade",
@@ -32,6 +32,16 @@ class GeneratedPackageTests(TestCase):
             SCENARIO_LIBRARY["dependency_cascade"]["recommended_roles"],
             exercise.participants,
         )
+        opening = next(
+            inject for inject in injects if inject.title == "Initial Situation Brief"
+        )
+        executive = next(
+            inject for inject in injects if inject.title == "Executive Status Request"
+        )
+        self.assertEqual(0, opening.scheduled_offset_seconds)
+        self.assertTrue(opening.auto_deliver)
+        self.assertEqual(20 * 60, executive.scheduled_offset_seconds)
+        self.assertTrue(executive.auto_deliver)
 
     def test_every_scenario_generates_runnable_chaos_controls(self) -> None:
         with TemporaryDirectory() as temporary:

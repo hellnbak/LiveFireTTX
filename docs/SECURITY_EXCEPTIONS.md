@@ -2,7 +2,7 @@
 
 ## Starlette 0.49.3
 
-The v1.0 runtime pins the newest Starlette release compatible with FastAPI
+The v1 runtime pins the newest Starlette release compatible with FastAPI
 0.128.8. On 2026-07-30, the vulnerability service reports the following
 advisories with fixes only in Starlette 1.x:
 
@@ -18,7 +18,7 @@ contract.
 
 ## Mitigations
 
-- The v1.0 facilitator and generated services bind to localhost.
+- The v1 facilitator and generated services bind to localhost.
 - The application is not supported as an internet-facing or multi-user service.
 - Multipart parsing was removed; playbook imports use bounded raw YAML.
 - URL-encoded form parsing is bounded by bytes and field count.

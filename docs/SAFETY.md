@@ -26,7 +26,7 @@ LiveFireTTX must not generate, execute, or facilitate:
 - Arbitrary commands, executable injects, remote target addresses, or
   operator-selected filesystem paths
 
-## v1.0 Controller Guardrails
+## v1.1 Safety Guardrails
 
 - Allows only actions included in the generated scenario
 - Modifies generated synthetic state and package artifacts only
@@ -42,6 +42,8 @@ LiveFireTTX must not generate, execute, or facilitate:
 - Provides per-action reset and global emergency stop
 - Preserves evidence when state is reset
 - Rejects paths that resolve outside generated package boundaries
+- Restricts automatic scheduling to narrative injects; chaos actions always
+  require an explicit facilitator or playbook control request
 
 Dependency faults alter local API behavior only. They do not contact payment
 processors, queues, storage providers, telemetry systems, or third-party APIs.

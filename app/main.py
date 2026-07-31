@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlparse, urlsplit
+import asyncio
 import json
 import logging
 import uuid
@@ -22,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from app.config import settings
 from app.models import (
     Exercise,
     ExerciseCreate,
@@ -48,6 +51,16 @@ from app.services.artifacts import (
     create_safe_artifact_inject,
 )
 from app.services.generator import create_exercise_from_request
+from app.services.facilitator import (
+    ClockTransitionError,
+    clear_schedule,
+    clock_snapshot,
+    dispatch_due_injects,
+    inject_schedule_snapshot,
+    schedule_inject,
+    scheduler_loop,
+    transition_clock,
+)
 from app.services.intelligence import (
     RATING_LABELS,
     RATING_SCORES,
@@ -303,8 +316,23 @@ def _exercise_evidence(exercise):
 
 
 @app.on_event("startup")
-def startup() -> None:
+async def startup() -> None:
     init_db()
+    app.state.facilitator_scheduler = None
+    if settings.scheduler_enabled:
+        app.state.facilitator_scheduler = asyncio.create_task(
+            scheduler_loop(settings.scheduler_interval_seconds)
+        )
+
+
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    scheduler = getattr(app.state, "facilitator_scheduler", None)
+    if scheduler:
+        scheduler.cancel()
+        with suppress(asyncio.CancelledError):
+            await scheduler
+        app.state.facilitator_scheduler = None
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -396,6 +424,8 @@ def exercise_detail(request: Request, exercise_id: str):
     if not ex:
         raise HTTPException(404, "Exercise not found")
     injects, events, chaos_state, intelligence = _exercise_evidence(ex)
+    clock = clock_snapshot(ex)
+    inject_schedules = inject_schedule_snapshot(ex, injects)
     by_stage: dict[str, list[InjectOption]] = {}
     for i in injects:
         by_stage.setdefault(i.stage, []).append(i)
@@ -447,8 +477,40 @@ def exercise_detail(request: Request, exercise_id: str):
             "dependency_status": dependencies,
             "dependency_status_by_id": dependency_status_by_id,
             "participant_briefs": list_participant_briefs(ex),
+            "clock": clock,
+            "inject_schedules": {
+                item["id"]: item for item in inject_schedules
+            },
+            "scheduler_enabled": settings.scheduler_enabled,
         },
     )
+
+
+@app.post("/exercises/{exercise_id}/clock/{command}")
+def control_exercise_clock(exercise_id: str, command: str):
+    exercise = get_exercise(exercise_id)
+    if not exercise:
+        raise HTTPException(404, "Exercise not found")
+    try:
+        updated = transition_clock(exercise.id, command)
+    except ClockTransitionError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    event_titles = {
+        "start": "Exercise Started",
+        "pause": "Exercise Paused",
+        "resume": "Exercise Resumed",
+        "complete": "Exercise Completed",
+        "reset": "Exercise Clock Reset",
+    }
+    add_event(
+        updated.id,
+        f"exercise_{command}",
+        event_titles[command],
+        f"Facilitator changed exercise clock to {updated.status}",
+    )
+    if settings.scheduler_enabled and command in {"start", "resume"}:
+        dispatch_due_injects(updated.id)
+    return _redirect_to_exercise(updated)
 
 
 @app.post("/injects/{inject_id}/trigger")
@@ -514,6 +576,61 @@ async def trigger_inject(
     return _redirect_to_exercise(ex)
 
 
+@app.post("/injects/{inject_id}/schedule")
+async def set_inject_schedule(request: Request, inject_id: str):
+    inject = get_inject(inject_id)
+    if not inject:
+        raise HTTPException(404, "Inject not found")
+    exercise = get_exercise(inject.exercise_id)
+    if not exercise:
+        raise HTTPException(404, "Exercise not found")
+    fields = await _form_fields(request)
+    offset_minutes = _integer_field(fields, "offset_minutes", 0)
+    auto_deliver = _field(fields, "auto_deliver", "") == "on"
+    try:
+        updated = schedule_inject(
+            inject,
+            exercise,
+            offset_minutes,
+            auto_deliver,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    add_event(
+        exercise.id,
+        "inject_scheduled",
+        f"Inject Scheduled: {updated.title}",
+        (
+            f"Delivery: T+{offset_minutes} minutes\n"
+            f"Mode: {'automatic' if auto_deliver else 'facilitator prompt'}"
+        ),
+    )
+    if settings.scheduler_enabled:
+        dispatch_due_injects(exercise.id)
+    return _redirect_to_exercise(exercise)
+
+
+@app.post("/injects/{inject_id}/schedule/clear")
+def clear_inject_schedule(inject_id: str):
+    inject = get_inject(inject_id)
+    if not inject:
+        raise HTTPException(404, "Inject not found")
+    exercise = get_exercise(inject.exercise_id)
+    if not exercise:
+        raise HTTPException(404, "Exercise not found")
+    try:
+        clear_schedule(inject)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    add_event(
+        exercise.id,
+        "inject_schedule_cleared",
+        f"Inject Schedule Cleared: {inject.title}",
+        "The facilitator removed the scheduled delivery time",
+    )
+    return _redirect_to_exercise(exercise)
+
+
 @app.post("/exercises/{exercise_id}/chaos/reset")
 async def reset_exercise_chaos(request: Request, exercise_id: str):
     action = _field(await _form_fields(request), "action", "")
@@ -564,6 +681,7 @@ def exercise_chaos_status(exercise_id: str):
     ex = get_exercise(exercise_id)
     if not ex:
         raise HTTPException(404, "Exercise not found")
+    injects = get_injects(ex.id)
     control_status = read_control_status(ex)
     dependencies = (
         read_dependency_status(ex)
@@ -575,6 +693,8 @@ def exercise_chaos_status(exercise_id: str):
             "state": read_chaos_state(ex),
             "control": control_status,
             "dependencies": dependencies,
+            "clock": clock_snapshot(ex),
+            "inject_schedules": inject_schedule_snapshot(ex, injects),
         }
     )
 
