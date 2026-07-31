@@ -1,4 +1,4 @@
 # Copyright (c) 2026 Steve Manzuik
 # Licensed under FSL-1.1-ALv2. See LICENSE.
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"

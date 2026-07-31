@@ -366,9 +366,11 @@ def render_exercise_package(
 
             The generated control API is available at `http://127.0.0.1:8090/docs`
             after deploying the target environment. The facilitator console can edit
-            and launch YAML playbooks, pause future stage scheduling, skip stages,
-            replay a run with the same seed, and monitor safety budgets. Use the
-            emergency stop whenever observed impact exceeds the exercise plan.
+            playbooks visually or through YAML, validate and preview schedules,
+            manage template versions, create watermarked safe artifacts, pause future
+            stage scheduling, skip stages, replay a run with the same seed, and
+            monitor safety budgets. Use the emergency stop whenever observed impact
+            exceeds the exercise plan.
             """
         )
     )

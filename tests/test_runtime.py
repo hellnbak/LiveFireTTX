@@ -10,8 +10,13 @@ import yaml
 from app.models import Exercise, InjectOption
 from app.services.runtime import (
     ChaosPreflightError,
+    clone_playbook_configuration,
+    export_playbook_configuration,
+    list_playbook_versions,
+    restore_playbook_version,
     run_chaos_inject,
     save_playbook_configuration,
+    validate_playbook_configuration,
 )
 
 
@@ -135,6 +140,66 @@ stages:
             self.assertTrue(persisted.is_file())
             self.assertEqual(normalized, yaml.safe_load(persisted.read_text()))
 
+    def test_playbook_version_clone_restore_and_export_workflow(self) -> None:
+        with TemporaryDirectory() as temporary:
+            exercise = self.exercise(Path(temporary))
+            playbook_root = Path(temporary) / "chaos" / "playbooks"
+            playbook_root.mkdir(parents=True)
+            original = self.playbook("scenario_cascade", "Original")
+            playbook_path = playbook_root / "scenario_cascade.yml"
+            playbook_path.write_text(yaml.safe_dump(original, sort_keys=False))
+
+            def accept_configuration(
+                exercise,
+                endpoint,
+                payload=None,
+                method="POST",
+            ):
+                return payload
+
+            with patch(
+                "app.services.runtime._guarded_request",
+                side_effect=accept_configuration,
+            ):
+                updated = self.playbook("scenario_cascade", "Updated")
+                saved = save_playbook_configuration(exercise, updated)
+                versions = list_playbook_versions(
+                    exercise,
+                    "scenario_cascade",
+                )
+                validated = validate_playbook_configuration(exercise, updated)
+                cloned = clone_playbook_configuration(
+                    exercise,
+                    "scenario_cascade",
+                    "scenario_clone",
+                    "Scenario Clone",
+                )
+                restored = restore_playbook_version(
+                    exercise,
+                    "scenario_cascade",
+                    versions[0]["id"],
+                )
+                with self.assertRaisesRegex(ValueError, "already exists"):
+                    clone_playbook_configuration(
+                        exercise,
+                        "scenario_cascade",
+                        "scenario_clone",
+                        "Duplicate Clone",
+                    )
+
+            self.assertEqual("Updated", saved["name"])
+            self.assertEqual("Updated", validated["name"])
+            self.assertEqual(1, len(versions))
+            self.assertEqual("scenario_clone", cloned["id"])
+            self.assertEqual("Original", restored["name"])
+            self.assertIn(
+                "name: Original",
+                export_playbook_configuration(
+                    exercise,
+                    "scenario_cascade",
+                ),
+            )
+
     def test_chaos_script_cannot_escape_generated_directory(self) -> None:
         with TemporaryDirectory() as temporary:
             exercise = self.exercise(Path(temporary))
@@ -205,3 +270,29 @@ stages:
                 }
             )
         )
+
+    def playbook(self, playbook_id: str, name: str) -> dict:
+        return {
+            "id": playbook_id,
+            "name": name,
+            "description": "Test playbook",
+            "seed": 42,
+            "safety": {
+                "max_concurrent_actions": 1,
+                "max_severity_points": 2,
+                "max_playbook_seconds": 300,
+            },
+            "stages": [
+                {
+                    "id": "degrade",
+                    "title": "Degrade",
+                    "action": "app_degradation",
+                    "intensity": "medium",
+                    "pattern": "ramp",
+                    "duration_seconds": 60,
+                    "start_after_seconds": 0,
+                    "guardrail_profile": "standard",
+                    "depends_on": [],
+                }
+            ],
+        }

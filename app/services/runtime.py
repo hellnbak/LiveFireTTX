@@ -19,6 +19,8 @@ from app.models import Exercise, InjectOption
 
 
 CONTROL_URL = "http://127.0.0.1:8090"
+PLAYBOOK_ID_PATTERN = r"[a-z0-9][a-z0-9_-]{0,63}"
+PLAYBOOK_VERSION_PATTERN = r"\d{8}T\d{12}Z"
 
 
 class ChaosExecutionError(RuntimeError):
@@ -186,20 +188,102 @@ def read_playbook_configuration(exercise: Exercise) -> str:
         return yaml.safe_dump(next(iter(playbooks.values())), sort_keys=False)
 
 
+def read_playbook_definition(
+    exercise: Exercise,
+    playbook_id: str | None = None,
+) -> dict[str, Any]:
+    if playbook_id and not re.fullmatch(PLAYBOOK_ID_PATTERN, playbook_id):
+        raise ValueError("Invalid playbook id")
+    playbook_root = Path(exercise.package_path) / "chaos" / "playbooks"
+    candidates = (
+        [playbook_root / f"{playbook_id}.yml"]
+        if playbook_id
+        else sorted(playbook_root.glob("*.yml"))
+    )
+    for path in candidates:
+        try:
+            playbook = yaml.safe_load(path.read_text())
+        except (OSError, yaml.YAMLError):
+            continue
+        if isinstance(playbook, dict):
+            return playbook
+
+    state = read_chaos_state(exercise) or {}
+    playbooks = state.get("playbooks", {})
+    if playbook_id:
+        return dict(playbooks.get(playbook_id, {}))
+    if playbooks:
+        return dict(next(iter(playbooks.values())))
+    return {}
+
+
+def read_playbook_library(exercise: Exercise) -> list[dict[str, Any]]:
+    state = read_chaos_state(exercise) or {}
+    library = []
+    for playbook_id, state_playbook in state.get("playbooks", {}).items():
+        playbook = read_playbook_definition(exercise, playbook_id)
+        definition = playbook or dict(state_playbook)
+        library.append(
+            {
+                **definition,
+                "versions": list_playbook_versions(exercise, playbook_id),
+            }
+        )
+    return sorted(library, key=lambda playbook: playbook.get("name", ""))
+
+
+def list_playbook_versions(
+    exercise: Exercise,
+    playbook_id: str,
+) -> list[dict[str, str]]:
+    if not re.fullmatch(PLAYBOOK_ID_PATTERN, playbook_id):
+        raise ValueError("Invalid playbook id")
+    history_root = (
+        Path(exercise.package_path)
+        / "chaos"
+        / "playbooks"
+        / "history"
+        / playbook_id
+    )
+    versions = []
+    for path in sorted(history_root.glob("*.yml"), reverse=True):
+        if not re.fullmatch(PLAYBOOK_VERSION_PATTERN, path.stem):
+            continue
+        try:
+            created_at = datetime.strptime(
+                path.stem,
+                "%Y%m%dT%H%M%S%fZ",
+            ).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        versions.append(
+            {
+                "id": path.stem,
+                "created_at": created_at.isoformat(),
+            }
+        )
+    return versions
+
+
+def validate_playbook_configuration(
+    exercise: Exercise,
+    configuration: str | dict[str, Any],
+) -> dict[str, Any]:
+    playbook = _parse_playbook_configuration(configuration)
+    return _guarded_request(
+        exercise,
+        "/playbooks/validate",
+        playbook,
+    )
+
+
 def save_playbook_configuration(
     exercise: Exercise,
-    configuration: str,
+    configuration: str | dict[str, Any],
 ) -> dict[str, Any]:
-    if len(configuration.encode()) > 64 * 1024:
-        raise ValueError("Playbook configuration is too large")
-    try:
-        playbook = yaml.safe_load(configuration)
-    except yaml.YAMLError as exc:
-        raise ValueError(f"Invalid playbook YAML: {exc}") from exc
-    if not isinstance(playbook, dict):
-        raise ValueError("Playbook YAML must contain one playbook object")
+    playbook = _parse_playbook_configuration(configuration)
     playbook_id = str(playbook.get("id", ""))
-    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", playbook_id):
+    if not re.fullmatch(PLAYBOOK_ID_PATTERN, playbook_id):
         raise ValueError("Playbook id must use lowercase letters, numbers, _ or -")
     normalized = _guarded_request(
         exercise,
@@ -209,10 +293,81 @@ def save_playbook_configuration(
     )
     playbook_root = Path(exercise.package_path) / "chaos" / "playbooks"
     playbook_root.mkdir(parents=True, exist_ok=True)
-    (playbook_root / f"{normalized['id']}.yml").write_text(
-        yaml.safe_dump(normalized, sort_keys=False)
-    )
+    playbook_path = playbook_root / f"{normalized['id']}.yml"
+    serialized = yaml.safe_dump(normalized, sort_keys=False)
+    if playbook_path.exists():
+        current = playbook_path.read_text()
+        if current != serialized:
+            history_root = (
+                playbook_root / "history" / normalized["id"]
+            )
+            history_root.mkdir(parents=True, exist_ok=True)
+            version_id = datetime.now(timezone.utc).strftime(
+                "%Y%m%dT%H%M%S%fZ"
+            )
+            (history_root / f"{version_id}.yml").write_text(current)
+    playbook_path.write_text(serialized)
     return normalized
+
+
+def clone_playbook_configuration(
+    exercise: Exercise,
+    source_playbook_id: str,
+    new_playbook_id: str,
+    new_name: str,
+) -> dict[str, Any]:
+    if not re.fullmatch(PLAYBOOK_ID_PATTERN, new_playbook_id):
+        raise ValueError("Invalid cloned playbook id")
+    name = new_name.strip()
+    if not name or len(name) > 120:
+        raise ValueError("Cloned playbook name must be between 1 and 120 characters")
+    if read_playbook_definition(exercise, new_playbook_id):
+        raise ValueError(f"Playbook already exists: {new_playbook_id}")
+    source = read_playbook_definition(exercise, source_playbook_id)
+    if not source:
+        raise ValueError(f"Playbook not found: {source_playbook_id}")
+    clone = json.loads(json.dumps(source))
+    clone["id"] = new_playbook_id
+    clone["name"] = name
+    clone["description"] = (
+        f"Cloned from {source_playbook_id}. "
+        f"{clone.get('description', '')}"
+    )[:500]
+    return save_playbook_configuration(exercise, clone)
+
+
+def restore_playbook_version(
+    exercise: Exercise,
+    playbook_id: str,
+    version_id: str,
+) -> dict[str, Any]:
+    if not re.fullmatch(PLAYBOOK_ID_PATTERN, playbook_id):
+        raise ValueError("Invalid playbook id")
+    if not re.fullmatch(PLAYBOOK_VERSION_PATTERN, version_id):
+        raise ValueError("Invalid playbook version")
+    version_path = (
+        Path(exercise.package_path)
+        / "chaos"
+        / "playbooks"
+        / "history"
+        / playbook_id
+        / f"{version_id}.yml"
+    )
+    try:
+        configuration = version_path.read_text()
+    except OSError as exc:
+        raise ValueError("Playbook version not found") from exc
+    return save_playbook_configuration(exercise, configuration)
+
+
+def export_playbook_configuration(
+    exercise: Exercise,
+    playbook_id: str,
+) -> str:
+    playbook = read_playbook_definition(exercise, playbook_id)
+    if not playbook:
+        raise ValueError(f"Playbook not found: {playbook_id}")
+    return yaml.safe_dump(playbook, sort_keys=False)
 
 
 def start_chaos_playbook(
@@ -223,6 +378,25 @@ def start_chaos_playbook(
         exercise,
         f"/playbooks/{quote(playbook_id)}/start",
     )
+
+
+def _parse_playbook_configuration(
+    configuration: str | dict[str, Any],
+) -> dict[str, Any]:
+    if isinstance(configuration, dict):
+        encoded = json.dumps(configuration).encode()
+        playbook = configuration
+    else:
+        encoded = configuration.encode()
+        try:
+            playbook = yaml.safe_load(configuration)
+        except yaml.YAMLError as exc:
+            raise ValueError(f"Invalid playbook YAML: {exc}") from exc
+    if len(encoded) > 64 * 1024:
+        raise ValueError("Playbook configuration is too large")
+    if not isinstance(playbook, dict):
+        raise ValueError("Playbook configuration must contain one object")
+    return playbook
 
 
 def control_chaos_playbook_run(

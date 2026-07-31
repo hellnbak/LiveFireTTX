@@ -2,7 +2,7 @@
 
 LiveFireTTX is a local-first application for building and running live-fire tabletop exercises. It helps facilitators generate a scenario-specific target environment, a safe chaos control plane, inject options, exercise artifacts, and a web console where the tabletop leader can steer the exercise.
 
-> **Status:** v0.5 prototype. Use only in controlled lab environments.
+> **Status:** v0.6 prototype. Use only in controlled lab environments.
 
 ## What it does
 
@@ -22,6 +22,10 @@ LiveFireTTX is a local-first application for building and running live-fire tabl
 - Computes a transparent provisional readiness score from assessment and run signals
 - Compares normalized observed impact across recent chaos runs
 - Exports Markdown, CSV, JSON, and state evidence in a single ZIP package
+- Provides a drag-and-drop playbook builder with timeline preview
+- Validates stage IDs, dependencies, cycles, timing, and controller safety rules
+- Supports template clone, YAML import/export, and local version restore
+- Creates constrained, watermarked facilitator artifacts inside exercise packages
 - Automatically rolls back expired actions or runs that exceed stop conditions
 - Provides reset and emergency-stop controls
 - Makes the generated target respond to latency, error, auth, DNS, backup, build, and data-integrity conditions
@@ -72,11 +76,12 @@ http://127.0.0.1:8000
 3. Choose a scenario type and fill in the business system, participants, duration, and objectives.
 4. Click **Generate Exercise**.
 5. Open the exercise console.
-6. Trigger narrative injects or chaos actions manually from the facilitator console.
-7. Add facilitator notes as the team makes decisions.
-8. Score objectives and review run-impact comparisons.
-9. Download the Markdown after-action report or ZIP evidence package.
-10. Download the generated exercise package.
+6. Design or select a playbook in the Scenario Design Studio.
+7. Trigger narrative injects, safe artifacts, or chaos actions.
+8. Add facilitator notes as the team makes decisions.
+9. Score objectives and review run-impact comparisons.
+10. Download the Markdown after-action report or ZIP evidence package.
+11. Download the generated exercise package.
 
 Generated packages are created under:
 
@@ -132,6 +137,7 @@ app/
   services/lab_renderer.py # Target and safe chaos control-plane rendering
   services/runtime.py      # Validated local chaos execution
   services/intelligence.py # Objective scoring, run comparison, evidence export
+  services/artifacts.py    # Constrained facilitator artifact generation
   templates/               # Jinja2 UI templates and CSS
 docs/
   ARCHITECTURE.md

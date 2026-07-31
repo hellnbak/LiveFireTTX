@@ -95,6 +95,53 @@ label { font-weight:700; margin-top: 8px; }
 .playbook-card { border:1px solid #e2e8f0; border-radius:16px; padding:16px; margin-top:14px; background:linear-gradient(145deg, #fff, #f8fafc); }
 .budget-row { display:flex; flex-wrap:wrap; gap:8px; }
 .budget-row span { background:#e2e8f0; color:#475569; border-radius:999px; padding:5px 9px; font-size:11px; font-weight:800; }
+.studio-shell { background:linear-gradient(145deg, #fff, #f8fafc); }
+.import-form { display:flex; align-items:center; gap:8px; }
+.import-form input { max-width:230px; }
+.studio-layout { display:grid; grid-template-columns:300px 1fr; gap:18px; align-items:start; margin-top:18px; }
+.template-library { display:grid; gap:10px; max-height:980px; overflow:auto; padding-right:5px; }
+.template-library h4 { margin:0; }
+.template-card { border:1px solid #cbd5e1; border-radius:15px; padding:13px; background:white; }
+.template-card p { font-size:12px; color:#64748b; }
+.template-card small { display:block; margin-top:3px; }
+.template-actions { display:flex; gap:7px; margin-top:10px; }
+.template-card details { margin-top:10px; border-top:1px solid #e2e8f0; padding-top:8px; }
+.template-card summary, .advanced-yaml summary { cursor:pointer; font-weight:800; color:#475569; }
+.clone-form { margin-top:9px; }
+.version-list { display:grid; gap:6px; margin-top:9px; }
+.version-list form { display:flex; align-items:center; justify-content:space-between; gap:6px; }
+.version-list span { font-size:10px; color:#64748b; overflow-wrap:anywhere; }
+.visual-designer { border:1px solid #cbd5e1; border-radius:17px; padding:16px; background:white; min-width:0; }
+.designer-fields { display:grid; grid-template-columns:1fr 1.4fr .7fr; gap:10px; }
+.designer-description { grid-column:1 / -1; }
+.safety-budget-editor { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:10px; align-items:end; margin:14px 0; padding:13px; border-radius:14px; background:#111827; color:white; }
+.safety-budget-editor label { color:#cbd5e1; }
+.budget-preview { grid-column:1 / -1; color:#fdba74; font-size:11px; font-weight:800; }
+.stage-toolbar { margin:18px 0 10px; }
+.stage-toolbar h4 { margin:0 0 3px; }
+.designer-stages { display:grid; gap:10px; }
+.designer-stage { border:1px solid #cbd5e1; border-left:5px solid #f97316; border-radius:14px; padding:13px; background:#f8fafc; transition:opacity .15s, transform .15s, box-shadow .15s; }
+.designer-stage.dragging { opacity:.45; transform:scale(.99); box-shadow:0 12px 28px rgba(15,23,42,.2); }
+.stage-card-header { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; }
+.drag-handle { cursor:grab; color:#94a3b8; font-size:18px; letter-spacing:-4px; margin-right:auto; }
+.stage-editor-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:9px; }
+.stage-dependencies { grid-column:span 2; }
+.preview-panel { margin-top:16px; border:1px solid #e2e8f0; border-radius:14px; padding:13px; }
+.preview-panel h4 { margin:0; }
+.timeline-preview { display:grid; gap:8px; margin-top:10px; }
+.preview-lane { display:grid; grid-template-columns:150px 1fr; gap:8px; align-items:center; font-size:11px; }
+.preview-lane > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:800; }
+.preview-track { position:relative; height:16px; border-radius:999px; background:repeating-linear-gradient(90deg, #e2e8f0 0, #e2e8f0 1px, #f8fafc 1px, #f8fafc 10%); overflow:hidden; }
+.preview-bar { position:absolute; top:2px; bottom:2px; border-radius:999px; background:#f97316; min-width:4px; }
+.preview-bar.intensity-low { background:#38bdf8; }
+.preview-bar.intensity-medium { background:#f97316; }
+.preview-bar.intensity-high { background:#dc2626; }
+.designer-validation { margin:12px 0; padding:10px 12px; border-radius:12px; background:#e2e8f0; color:#475569; font-size:12px; font-weight:800; }
+.designer-validation.valid { background:#dcfce7; color:#166534; }
+.designer-validation.warning { background:#fef3c7; color:#92400e; }
+.designer-validation.invalid { background:#fee2e2; color:#991b1b; }
+.designer-validation.checking { background:#e0f2fe; color:#075985; }
+.advanced-yaml { margin-top:18px; border-top:1px solid #cbd5e1; padding-top:14px; }
 .yaml-editor { min-height:390px; resize:vertical; background:#111827; color:#d1fae5; border-color:#334155; font:13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; tab-size:2; }
 .playbook-run { border:1px solid #cbd5e1; border-radius:16px; padding:16px; margin-top:14px; }
 .stage-timeline { display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:10px; margin-top:14px; }
@@ -105,7 +152,11 @@ label { font-weight:700; margin-top: 8px; }
 .timeline-stage.skipped { opacity:.65; }
 .stage-index { position:absolute; left:10px; top:10px; width:23px; height:23px; border-radius:50%; display:grid; place-items:center; background:#111827; color:white; font-size:11px; font-weight:900; }
 .compact-button { padding:6px 9px; font-size:11px; }
+.artifact-studio { align-items:start; }
+.artifact-fields { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; }
+.artifact-safety { border:1px solid #bbf7d0; background:linear-gradient(145deg, #fff, #f0fdf4); }
+.artifact-safety li { margin:9px 0; color:#475569; }
 pre { white-space: pre-wrap; background:#111827; color:#e5e7eb; border-radius: 12px; padding: 10px; overflow:auto; }
 code { background:#f3f4f6; padding:2px 6px; border-radius:6px; }
 ul { margin-top: 8px; }
-@media (max-width: 800px) { .two, .inject-grid, .condition-grid, .inject-controls, .run-row, .command-summary, .telemetry-grid, .intelligence-overview, .signal-grid, .objective-grid, .objective-fields, .comparison-row { grid-template-columns: 1fr; } .score-ring { margin:auto; } .peak-values { justify-content:flex-start; } header, .row.between { align-items:flex-start; gap: 12px; flex-direction:column; } }
+@media (max-width: 800px) { .two, .inject-grid, .condition-grid, .inject-controls, .run-row, .command-summary, .telemetry-grid, .intelligence-overview, .signal-grid, .objective-grid, .objective-fields, .comparison-row, .studio-layout, .designer-fields, .safety-budget-editor, .stage-editor-grid, .artifact-fields { grid-template-columns: 1fr; } .designer-description, .stage-dependencies, .budget-preview { grid-column:auto; } .preview-lane { grid-template-columns:100px 1fr; } .score-ring { margin:auto; } .peak-values { justify-content:flex-start; } .import-form { align-items:stretch; flex-direction:column; } header, .row.between { align-items:flex-start; gap: 12px; flex-direction:column; } }

@@ -69,3 +69,12 @@ Run generated environments only in isolated lab systems. Review generated packag
 - Evidence exports contain local exercise data, notes, state, and artifact references.
 - CSV cells beginning with spreadsheet formula characters are escaped on export.
 - Operators should review evidence packages before sharing them outside the exercise team.
+
+## Facilitator artifact safety
+
+- Artifact types are restricted to messages, alerts, tickets, and advisories.
+- Artifact files receive generated names and remain under `artifacts/facilitator/`.
+- Titles and audiences must be single-line values; content is size-limited.
+- Every artifact is watermarked as simulated at the beginning and end.
+- Triggering an artifact verifies the resolved path remains inside the package.
+- Artifacts cannot contain executable payloads or select an output path.

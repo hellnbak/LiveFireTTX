@@ -57,14 +57,26 @@
 - JSON state snapshot and export manifest
 - Spreadsheet formula-injection protection in CSV evidence
 
-## Next: v0.6 scenario design studio
+## v0.6 Scenario design studio
 
 - Visual drag-and-drop playbook builder
 - Facilitator-defined safe artifact injects
-- Additional simulated service dependencies
 - Saved playbook template library
 - Playbook import, export, clone, and version history
 - Scenario preview and validation workspace
+- Local dependency-cycle, stage-ID, timing, and budget checks
+- Controller-backed validation and versioned saves
+- Advanced YAML fallback for power users
+- Watermarked, package-contained artifact generation
+
+## Next: v0.7 dependency realism
+
+- Simulated payment processor failures
+- Queue backlog and delayed-consumer conditions
+- Object storage throttling and stale reads
+- Third-party API degradation and rate limiting
+- Observability gaps and delayed synthetic telemetry
+- Cross-service dependency maps in the scenario designer
 
 ## Near-term exercise workflow
 

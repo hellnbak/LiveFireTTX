@@ -130,6 +130,54 @@
 </section>
 {% endif %}
 
+<section class="grid two artifact-studio">
+  <div class="card">
+    <p class="eyebrow">Safe Artifact Designer</p>
+    <h3>Create Facilitator Inject</h3>
+    <p class="muted">Creates a clearly watermarked local exercise artifact. It cannot execute commands, contact external systems, or write outside this exercise package.</p>
+    <form action="/exercises/{{ exercise.id }}/artifacts" method="post">
+      <div class="artifact-fields">
+        <div class="control-field">
+          <label for="artifact-title">Title</label>
+          <input id="artifact-title" name="title" maxlength="120" required>
+        </div>
+        <div class="control-field">
+          <label for="artifact-audience">Audience</label>
+          <input id="artifact-audience" name="audience" maxlength="120" required>
+        </div>
+        <div class="control-field">
+          <label for="artifact-stage">Exercise Stage</label>
+          <input id="artifact-stage" name="stage" value="03-facilitator-artifacts" pattern="[a-z0-9][a-z0-9_-]{0,63}" required>
+        </div>
+        <div class="control-field">
+          <label for="artifact-kind">Artifact Type</label>
+          <select id="artifact-kind" name="artifact_kind">
+            {% for kind, detail in artifact_kinds.items() %}
+              <option value="{{ kind }}">{{ detail.get('label') }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="control-field">
+        <label for="artifact-content">Inject Content</label>
+        <textarea id="artifact-content" name="content" rows="8" maxlength="10000" placeholder="Write the simulated message, alert, ticket, or advisory participants should receive." required></textarea>
+      </div>
+      <button class="button primary" type="submit">Create Safe Artifact</button>
+    </form>
+  </div>
+  <div class="card artifact-safety">
+    <p class="eyebrow">Guardrails</p>
+    <h3>Artifact Safety Boundary</h3>
+    <ul>
+      <li>Stored only under <code>artifacts/facilitator/</code>.</li>
+      <li>Watermarked as simulated at the top and bottom.</li>
+      <li>Limited to approved email, message, alert, ticket, and advisory formats.</li>
+      <li>Added as a normal facilitator inject with complete run-log evidence.</li>
+      <li>Plain Markdown output only; no executable files or operator-selected paths.</li>
+    </ul>
+  </div>
+</section>
+
 <section class="card wide">
   <div class="row between">
     <div>
@@ -237,43 +285,159 @@
   {% endif %}
 </section>
 
-{% if chaos_state and chaos_state.get('playbooks') %}
-<section class="grid two orchestration-grid">
-  <div class="card">
-    <p class="eyebrow">Playbook Library</p>
-    <h3>Scenario Sequences</h3>
-    <p class="muted">Each launch snapshots the definition and seed for deterministic replay.</p>
-    {% for playbook_id, playbook in chaos_state.get('playbooks', {}).items() %}
-      <div class="playbook-card">
-        <div class="row between">
-          <div>
-            <strong>{{ playbook.get('name', playbook_id) }}</strong>
-            <div class="muted">{{ playbook.get('stages', [])|length }} stages · seed {{ playbook.get('seed', 2026) }}</div>
-          </div>
-          <form class="inline-form" action="/exercises/{{ exercise.id }}/playbooks/{{ playbook_id }}/start" method="post">
-            <button class="button primary" type="submit" {{ 'disabled' if not control_status.get('ready') else '' }}>Launch</button>
-          </form>
-        </div>
-        <p>{{ playbook.get('description', '') }}</p>
-        <div class="budget-row">
-          <span>Concurrent {{ playbook.get('safety', {}).get('max_concurrent_actions', 2) }}</span>
-          <span>Severity {{ playbook.get('safety', {}).get('max_severity_points', 4) }}</span>
-          <span>Window {{ playbook.get('safety', {}).get('max_playbook_seconds', 1800) }}s</span>
-        </div>
-      </div>
-    {% endfor %}
-  </div>
-  <div class="card">
-    <p class="eyebrow">Configuration</p>
-    <h3>YAML Editor</h3>
-    <p class="muted">Saving validates action allowlists, dependencies, timing, patterns, and budgets before replacing the controller copy.</p>
-    <form action="/exercises/{{ exercise.id }}/playbooks" method="post">
-      <textarea class="yaml-editor" name="playbook_yaml" rows="22" spellcheck="false" required>{{ playbook_configuration }}</textarea>
-      <button class="button" type="submit" {{ 'disabled' if not control_status.get('reachable') else '' }}>Validate &amp; Save</button>
+{% if playbook_library %}
+<section class="card wide studio-shell">
+  <div class="row between">
+    <div>
+      <p class="eyebrow">Scenario Design Studio</p>
+      <h3>Visual Playbook Builder</h3>
+      <p class="muted">Drag stages into order, preview timing, and validate dependencies and safety budgets before saving.</p>
+    </div>
+    <form class="import-form" action="/exercises/{{ exercise.id }}/playbooks/import" method="post" enctype="multipart/form-data">
+      <input type="file" name="playbook_file" accept=".yml,.yaml,text/yaml" required>
+      <button class="button" type="submit" {{ 'disabled' if not control_status.get('reachable') else '' }}>Import YAML</button>
     </form>
   </div>
+  <div class="studio-layout">
+    <aside class="template-library">
+      <h4>Template Library</h4>
+      {% for playbook in playbook_library %}
+        <article class="template-card">
+          <div class="row between">
+            <div>
+              <strong>{{ playbook.get('name') }}</strong>
+              <small>{{ playbook.get('id') }} · {{ playbook.get('stages', [])|length }} stages</small>
+            </div>
+            <button class="button compact-button load-playbook" type="button" data-playbook-id="{{ playbook.get('id') }}">Edit</button>
+          </div>
+          <p>{{ playbook.get('description', '') }}</p>
+          <div class="budget-row">
+            <span>C {{ playbook.get('safety', {}).get('max_concurrent_actions', 2) }}</span>
+            <span>S {{ playbook.get('safety', {}).get('max_severity_points', 4) }}</span>
+            <span>{{ playbook.get('safety', {}).get('max_playbook_seconds', 1800) }}s</span>
+          </div>
+          <div class="template-actions">
+            <form class="inline-form" action="/exercises/{{ exercise.id }}/playbooks/{{ playbook.get('id') }}/start" method="post">
+              <button class="button primary compact-button" type="submit" {{ 'disabled' if not control_status.get('ready') else '' }}>Launch</button>
+            </form>
+            <a class="button compact-button" href="/exercises/{{ exercise.id }}/playbooks/{{ playbook.get('id') }}/export.yml">Export</a>
+          </div>
+          <details>
+            <summary>Clone or restore</summary>
+            <form class="clone-form" action="/exercises/{{ exercise.id }}/playbooks/{{ playbook.get('id') }}/clone" method="post">
+              <input name="new_playbook_id" placeholder="new_playbook_id" pattern="[a-z0-9][a-z0-9_-]{0,63}" required>
+              <input name="new_name" placeholder="New playbook name" maxlength="120" required>
+              <button class="button compact-button" type="submit">Clone Template</button>
+            </form>
+            {% if playbook.get('versions') %}
+              <div class="version-list">
+                {% for version in playbook.get('versions') %}
+                  <form action="/exercises/{{ exercise.id }}/playbooks/{{ playbook.get('id') }}/versions/{{ version.get('id') }}/restore" method="post">
+                    <span>{{ version.get('created_at') }}</span>
+                    <button class="button compact-button" type="submit">Restore</button>
+                  </form>
+                {% endfor %}
+              </div>
+            {% else %}
+              <small>No previous versions yet.</small>
+            {% endif %}
+          </details>
+        </article>
+      {% endfor %}
+    </aside>
+
+    <div class="visual-designer">
+      <div class="designer-fields">
+        <div class="control-field">
+          <label for="designer-id">Playbook ID</label>
+          <input id="designer-id" maxlength="64" pattern="[a-z0-9][a-z0-9_-]{0,63}">
+        </div>
+        <div class="control-field">
+          <label for="designer-name">Name</label>
+          <input id="designer-name" maxlength="120">
+        </div>
+        <div class="control-field designer-description">
+          <label for="designer-description">Description</label>
+          <textarea id="designer-description" rows="2" maxlength="500"></textarea>
+        </div>
+        <div class="control-field">
+          <label for="designer-seed">Replay Seed</label>
+          <input id="designer-seed" type="number">
+        </div>
+      </div>
+      <div class="safety-budget-editor">
+        <div class="control-field">
+          <label for="designer-concurrency">Max Concurrent</label>
+          <input id="designer-concurrency" type="number" min="1" max="5">
+        </div>
+        <div class="control-field">
+          <label for="designer-severity">Max Severity</label>
+          <input id="designer-severity" type="number" min="1" max="15">
+        </div>
+        <div class="control-field">
+          <label for="designer-window">Time Budget</label>
+          <input id="designer-window" type="number" min="60" max="7200">
+        </div>
+        <div id="budget-preview" class="budget-preview"></div>
+      </div>
+
+      <div class="row between stage-toolbar">
+        <div>
+          <h4>Stages</h4>
+          <small>Drag cards to reorder. Dependencies use comma-separated stage IDs.</small>
+        </div>
+        <button id="add-stage" class="button" type="button">Add Stage</button>
+      </div>
+      <div id="designer-stages" class="designer-stages"></div>
+
+      <div class="preview-panel">
+        <div class="row between">
+          <h4>Timeline Preview</h4>
+          <span id="preview-duration" class="pill"></span>
+        </div>
+        <div id="timeline-preview" class="timeline-preview"></div>
+      </div>
+      <div id="designer-validation" class="designer-validation">Edit a stage to begin validation.</div>
+      <div class="actions">
+        <button id="validate-playbook" class="button" type="button" {{ 'disabled' if not control_status.get('reachable') else '' }}>Validate with Controller</button>
+        <button id="save-playbook" class="button primary" type="button" {{ 'disabled' if not control_status.get('reachable') else '' }}>Save Version</button>
+      </div>
+    </div>
+  </div>
+  <details class="advanced-yaml">
+    <summary>Advanced YAML editor</summary>
+    <p class="muted">Direct YAML saves use the same controller validation and create a version snapshot.</p>
+    <form action="/exercises/{{ exercise.id }}/playbooks" method="post">
+      <textarea class="yaml-editor" name="playbook_yaml" rows="18" spellcheck="false" required>{{ playbook_configuration }}</textarea>
+      <button class="button" type="submit" {{ 'disabled' if not control_status.get('reachable') else '' }}>Validate &amp; Save YAML</button>
+    </form>
+  </details>
 </section>
 {% endif %}
+
+<template id="designer-stage-template">
+  <article class="designer-stage" draggable="true">
+    <div class="stage-card-header">
+      <span class="drag-handle" title="Drag to reorder">⋮⋮</span>
+      <strong data-stage-number>Stage</strong>
+      <div class="actions">
+        <button class="button compact-button duplicate-stage" type="button">Duplicate</button>
+        <button class="button compact-button remove-stage" type="button">Remove</button>
+      </div>
+    </div>
+    <div class="stage-editor-grid">
+      <div class="control-field"><label>Stage ID</label><input data-field="id" maxlength="64"></div>
+      <div class="control-field"><label>Title</label><input data-field="title" maxlength="120"></div>
+      <div class="control-field"><label>Action</label><select data-field="action"></select></div>
+      <div class="control-field"><label>Intensity</label><select data-field="intensity"><option>low</option><option>medium</option><option>high</option></select></div>
+      <div class="control-field"><label>Pattern</label><select data-field="pattern"><option>steady</option><option>ramp</option><option>burst</option><option>flap</option><option>jitter</option></select></div>
+      <div class="control-field"><label>Guardrails</label><select data-field="guardrail_profile"><option>strict</option><option>standard</option><option>observe</option></select></div>
+      <div class="control-field"><label>Duration (seconds)</label><input data-field="duration_seconds" type="number" min="15" max="3600"></div>
+      <div class="control-field"><label>Start After (seconds)</label><input data-field="start_after_seconds" type="number" min="0" max="7200"></div>
+      <div class="control-field stage-dependencies"><label>Depends On</label><input data-field="depends_on" placeholder="stage_one, stage_two"></div>
+    </div>
+  </article>
+</template>
 
 {% if chaos_state and chaos_state.get('playbook_runs') %}
 <section class="card wide">
@@ -403,6 +567,302 @@
   </div>
 </section>
 <script>
+(() => {
+  const stageContainer = document.querySelector("#designer-stages");
+  if (!stageContainer) return;
+
+  const exerciseId = {{ exercise.id|tojson }};
+  const playbookLibrary = {{ playbook_library|tojson }};
+  const chaosActions = {{ chaos_actions|tojson }};
+  const initialPlaybook = {{ designer_playbook|tojson }};
+  const stageTemplate = document.querySelector("#designer-stage-template");
+  const validationPanel = document.querySelector("#designer-validation");
+  const timelinePreview = document.querySelector("#timeline-preview");
+  const previewDuration = document.querySelector("#preview-duration");
+  const severityPoints = {low: 1, medium: 2, high: 3};
+  let draggedStage = null;
+
+  const field = (id) => document.querySelector(`#${id}`);
+  const value = (id, fallback = "") => field(id)?.value ?? fallback;
+  const numberValue = (id, fallback) => Number(value(id, fallback)) || fallback;
+
+  const stageFromCard = (card) => {
+    const stageValue = (name) => card.querySelector(`[data-field="${name}"]`).value;
+    return {
+      id: stageValue("id").trim(),
+      title: stageValue("title").trim(),
+      action: stageValue("action"),
+      intensity: stageValue("intensity"),
+      pattern: stageValue("pattern"),
+      duration_seconds: Number(stageValue("duration_seconds")) || 0,
+      start_after_seconds: Number(stageValue("start_after_seconds")) || 0,
+      guardrail_profile: stageValue("guardrail_profile"),
+      depends_on: stageValue("depends_on").split(",").map((item) => item.trim()).filter(Boolean),
+    };
+  };
+
+  const collectPlaybook = () => ({
+    id: value("designer-id").trim(),
+    name: value("designer-name").trim(),
+    description: value("designer-description").trim(),
+    seed: numberValue("designer-seed", 2026),
+    safety: {
+      max_concurrent_actions: numberValue("designer-concurrency", 2),
+      max_severity_points: numberValue("designer-severity", 4),
+      max_playbook_seconds: numberValue("designer-window", 1800),
+    },
+    stages: [...stageContainer.querySelectorAll(".designer-stage")].map(stageFromCard),
+  });
+
+  const updateStageNumbers = () => {
+    stageContainer.querySelectorAll(".designer-stage").forEach((card, index) => {
+      card.querySelector("[data-stage-number]").textContent = `Stage ${index + 1}`;
+    });
+  };
+
+  const renderStage = (stage = {}) => {
+    const fragment = stageTemplate.content.cloneNode(true);
+    const card = fragment.querySelector(".designer-stage");
+    const actionSelect = card.querySelector('[data-field="action"]');
+    for (const action of chaosActions) {
+      const option = document.createElement("option");
+      option.value = action.id;
+      option.textContent = `${action.label} (${action.id})`;
+      actionSelect.append(option);
+    }
+    const defaults = {
+      id: `stage_${stageContainer.children.length + 1}`,
+      title: chaosActions[0]?.label || "Scenario Stage",
+      action: chaosActions[0]?.id || "",
+      intensity: "medium",
+      pattern: "steady",
+      duration_seconds: 180,
+      start_after_seconds: stageContainer.children.length * 60,
+      guardrail_profile: "standard",
+      depends_on: [],
+      ...stage,
+    };
+    for (const [name, stageValue] of Object.entries(defaults)) {
+      const input = card.querySelector(`[data-field="${name}"]`);
+      if (!input) continue;
+      input.value = Array.isArray(stageValue) ? stageValue.join(", ") : stageValue;
+    }
+    card.querySelector(".remove-stage").addEventListener("click", () => {
+      card.remove();
+      updateDesigner();
+    });
+    card.querySelector(".duplicate-stage").addEventListener("click", () => {
+      const copy = stageFromCard(card);
+      const ids = new Set(collectPlaybook().stages.map((item) => item.id));
+      let candidate = `${copy.id || "stage"}_copy`;
+      let suffix = 2;
+      while (ids.has(candidate)) candidate = `${copy.id}_copy_${suffix++}`;
+      copy.id = candidate;
+      copy.title = `${copy.title || "Stage"} Copy`;
+      renderStage(copy);
+      updateDesigner();
+    });
+    card.addEventListener("dragstart", () => {
+      draggedStage = card;
+      card.classList.add("dragging");
+    });
+    card.addEventListener("dragend", () => {
+      draggedStage = null;
+      card.classList.remove("dragging");
+      updateDesigner();
+    });
+    card.addEventListener("input", updateDesigner);
+    card.addEventListener("change", updateDesigner);
+    stageContainer.append(card);
+    updateStageNumbers();
+  };
+
+  const loadPlaybook = (playbook) => {
+    if (!playbook) return;
+    field("designer-id").value = playbook.id || "";
+    field("designer-name").value = playbook.name || "";
+    field("designer-description").value = playbook.description || "";
+    field("designer-seed").value = playbook.seed ?? 2026;
+    field("designer-concurrency").value = playbook.safety?.max_concurrent_actions ?? 2;
+    field("designer-severity").value = playbook.safety?.max_severity_points ?? 4;
+    field("designer-window").value = playbook.safety?.max_playbook_seconds ?? 1800;
+    stageContainer.replaceChildren();
+    for (const stage of playbook.stages || []) renderStage(stage);
+    if (!stageContainer.children.length) renderStage();
+    updateDesigner();
+  };
+
+  const dependencyErrors = (stages) => {
+    const errors = [];
+    const ids = stages.map((stage) => stage.id);
+    const idSet = new Set(ids);
+    if (idSet.size !== ids.length) errors.push("Stage IDs must be unique.");
+    const graph = new Map(stages.map((stage) => [stage.id, stage.depends_on]));
+    for (const stage of stages) {
+      if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(stage.id)) errors.push(`Invalid stage ID: ${stage.id || "(blank)"}.`);
+      const unknown = stage.depends_on.filter((dependency) => !idSet.has(dependency));
+      if (unknown.length) errors.push(`${stage.id} has unknown dependencies: ${unknown.join(", ")}.`);
+      if (stage.depends_on.includes(stage.id)) errors.push(`${stage.id} cannot depend on itself.`);
+    }
+    const visiting = new Set();
+    const visited = new Set();
+    const visit = (id) => {
+      if (visiting.has(id)) return true;
+      if (visited.has(id) || !graph.has(id)) return false;
+      visiting.add(id);
+      for (const dependency of graph.get(id)) {
+        if (visit(dependency)) return true;
+      }
+      visiting.delete(id);
+      visited.add(id);
+      return false;
+    };
+    if (ids.some(visit)) errors.push("Stage dependencies contain a cycle.");
+    return errors;
+  };
+
+  const budgetMetrics = (stages) => {
+    const events = [];
+    for (const stage of stages) {
+      const start = Math.max(0, stage.start_after_seconds || 0);
+      const end = start + Math.max(0, stage.duration_seconds || 0);
+      const severity = severityPoints[stage.intensity] || 0;
+      events.push({time: start, count: 1, severity});
+      events.push({time: end, count: -1, severity: -severity});
+    }
+    events.sort((left, right) => left.time - right.time || left.count - right.count);
+    let count = 0;
+    let severity = 0;
+    let maxCount = 0;
+    let maxSeverity = 0;
+    for (const event of events) {
+      count += event.count;
+      severity += event.severity;
+      maxCount = Math.max(maxCount, count);
+      maxSeverity = Math.max(maxSeverity, severity);
+    }
+    return {
+      maxCount,
+      maxSeverity,
+      duration: stages.reduce(
+        (maximum, stage) => Math.max(maximum, stage.start_after_seconds + stage.duration_seconds),
+        0,
+      ),
+    };
+  };
+
+  const localValidation = (playbook) => {
+    const errors = [];
+    if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(playbook.id)) errors.push("Playbook ID is invalid.");
+    if (!playbook.name || playbook.name.length > 120) errors.push("Playbook name is required.");
+    if (playbook.stages.length < 1 || playbook.stages.length > 20) errors.push("Use between 1 and 20 stages.");
+    if (playbook.safety.max_concurrent_actions < 1 || playbook.safety.max_concurrent_actions > 5) errors.push("Concurrent budget must be 1–5.");
+    if (playbook.safety.max_severity_points < 1 || playbook.safety.max_severity_points > 15) errors.push("Severity budget must be 1–15.");
+    if (playbook.safety.max_playbook_seconds < 60 || playbook.safety.max_playbook_seconds > 7200) errors.push("Time budget must be 60–7200 seconds.");
+    for (const stage of playbook.stages) {
+      if (!stage.title) errors.push(`${stage.id || "A stage"} needs a title.`);
+      if (stage.duration_seconds < 15 || stage.duration_seconds > 3600) errors.push(`${stage.id || "A stage"} duration must be 15–3600 seconds.`);
+      if (stage.start_after_seconds < 0 || stage.start_after_seconds > playbook.safety.max_playbook_seconds) errors.push(`${stage.id || "A stage"} starts outside the time budget.`);
+    }
+    errors.push(...dependencyErrors(playbook.stages));
+    return {errors, metrics: budgetMetrics(playbook.stages)};
+  };
+
+  const renderTimeline = (playbook, metrics) => {
+    timelinePreview.replaceChildren();
+    const scale = Math.max(playbook.safety.max_playbook_seconds, metrics.duration, 1);
+    previewDuration.textContent = `${metrics.duration}s designed / ${playbook.safety.max_playbook_seconds}s budget`;
+    for (const [index, stage] of playbook.stages.entries()) {
+      const lane = document.createElement("div");
+      lane.className = "preview-lane";
+      const label = document.createElement("span");
+      label.textContent = `${index + 1}. ${stage.id || "unnamed"}`;
+      const track = document.createElement("div");
+      track.className = "preview-track";
+      const bar = document.createElement("span");
+      bar.className = `preview-bar intensity-${stage.intensity}`;
+      bar.style.left = `${Math.min(100, (stage.start_after_seconds / scale) * 100)}%`;
+      bar.style.width = `${Math.max(1, Math.min(100, (stage.duration_seconds / scale) * 100))}%`;
+      bar.title = `${stage.action} · ${stage.pattern} · ${stage.duration_seconds}s`;
+      track.append(bar);
+      lane.append(label, track);
+      timelinePreview.append(lane);
+    }
+  };
+
+  const updateDesigner = () => {
+    updateStageNumbers();
+    const playbook = collectPlaybook();
+    const validation = localValidation(playbook);
+    renderTimeline(playbook, validation.metrics);
+    const throttles = [];
+    if (validation.metrics.maxCount > playbook.safety.max_concurrent_actions) throttles.push(`concurrency ${validation.metrics.maxCount}→${playbook.safety.max_concurrent_actions}`);
+    if (validation.metrics.maxSeverity > playbook.safety.max_severity_points) throttles.push(`severity ${validation.metrics.maxSeverity}→${playbook.safety.max_severity_points}`);
+    field("budget-preview").textContent = `Designed peak: ${validation.metrics.maxCount} concurrent / ${validation.metrics.maxSeverity} severity${throttles.length ? ` · scheduler will throttle ${throttles.join(", ")}` : ""}`;
+    validationPanel.className = `designer-validation ${validation.errors.length ? "invalid" : throttles.length ? "warning" : "valid"}`;
+    validationPanel.textContent = validation.errors.length
+      ? validation.errors.join(" ")
+      : throttles.length
+        ? "Locally valid. Safety budgets will delay overlapping stages."
+        : "Locally valid and within designed safety budgets.";
+    return validation;
+  };
+
+  const controllerRequest = async (operation) => {
+    const playbook = collectPlaybook();
+    const local = localValidation(playbook);
+    if (local.errors.length) {
+      updateDesigner();
+      return;
+    }
+    validationPanel.className = "designer-validation checking";
+    validationPanel.textContent = `${operation === "save" ? "Saving" : "Validating"} with the scenario controller…`;
+    try {
+      const response = await fetch(`/exercises/${exerciseId}/playbooks/designer/${operation}`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(playbook),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || "Controller rejected the playbook.");
+      validationPanel.className = "designer-validation valid";
+      validationPanel.textContent = operation === "save"
+        ? "Saved. A version snapshot was created when the prior definition changed."
+        : "Controller validation passed.";
+      if (operation === "save") window.setTimeout(() => window.location.reload(), 500);
+    } catch (error) {
+      validationPanel.className = "designer-validation invalid";
+      validationPanel.textContent = error.message;
+    }
+  };
+
+  stageContainer.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    const target = event.target.closest(".designer-stage");
+    if (!draggedStage || !target || draggedStage === target) return;
+    const bounds = target.getBoundingClientRect();
+    if (event.clientY < bounds.top + bounds.height / 2) {
+      target.before(draggedStage);
+    } else {
+      target.after(draggedStage);
+    }
+  });
+  document.querySelectorAll(".load-playbook").forEach((button) => {
+    button.addEventListener("click", () => {
+      loadPlaybook(playbookLibrary.find((playbook) => playbook.id === button.dataset.playbookId));
+    });
+  });
+  document.querySelector("#add-stage").addEventListener("click", () => {
+    renderStage();
+    updateDesigner();
+  });
+  document.querySelector("#validate-playbook").addEventListener("click", () => controllerRequest("validate"));
+  document.querySelector("#save-playbook").addEventListener("click", () => controllerRequest("save"));
+  document.querySelector(".visual-designer").addEventListener("input", updateDesigner);
+  document.querySelector(".visual-designer").addEventListener("change", updateDesigner);
+  loadPlaybook(initialPlaybook);
+})();
+
 (() => {
   const endpoint = "/exercises/{{ exercise.id }}/chaos/status";
   const setPill = (element, healthy, healthyText, failedText) => {

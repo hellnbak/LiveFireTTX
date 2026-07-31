@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
@@ -32,6 +32,11 @@ from app.models import (
     save_exercise,
     save_injects,
 )
+from app.services.artifacts import (
+    ARTIFACT_KINDS,
+    artifact_trigger_result,
+    create_safe_artifact_inject,
+)
 from app.services.generator import create_exercise_from_request
 from app.services.intelligence import (
     RATING_LABELS,
@@ -43,16 +48,22 @@ from app.services.intelligence import (
 from app.services.runtime import (
     ChaosExecutionError,
     ChaosPreflightError,
+    clone_playbook_configuration,
     control_chaos_playbook_run,
     emergency_stop,
+    export_playbook_configuration,
     read_chaos_state,
     read_control_status,
     read_playbook_configuration,
+    read_playbook_definition,
+    read_playbook_library,
     reset_chaos,
+    restore_playbook_version,
     run_chaos_inject,
     save_playbook_configuration,
     skip_chaos_playbook_stage,
     start_chaos_playbook,
+    validate_playbook_configuration,
 )
 from app.version import __version__
 
@@ -151,6 +162,22 @@ def exercise_detail(request: Request, exercise_id: str):
     by_stage = {}
     for i in injects:
         by_stage.setdefault(i.stage, []).append(i)
+    chaos_actions = []
+    known_actions = set()
+    for inject in injects:
+        action = inject.payload.get("action")
+        if inject.action_type != "chaos_script" or not action:
+            continue
+        if action in known_actions:
+            continue
+        known_actions.add(action)
+        chaos_actions.append({"id": action, "label": inject.title})
+    playbook_library = read_playbook_library(ex)
+    designer_playbook = (
+        read_playbook_definition(ex, playbook_library[0]["id"])
+        if playbook_library
+        else {}
+    )
     return templates.TemplateResponse(
         "exercise.html",
         {
@@ -161,6 +188,10 @@ def exercise_detail(request: Request, exercise_id: str):
             "chaos_state": chaos_state,
             "control_status": read_control_status(ex),
             "playbook_configuration": read_playbook_configuration(ex),
+            "playbook_library": playbook_library,
+            "designer_playbook": designer_playbook,
+            "chaos_actions": chaos_actions,
+            "artifact_kinds": ARTIFACT_KINDS,
             "intelligence": intelligence,
             "rating_labels": RATING_LABELS,
         },
@@ -207,6 +238,13 @@ def trigger_inject(
             result = str(exc)
             add_event(ex.id, "inject_failed", inj.title, result)
             raise HTTPException(500, result) from exc
+    elif inj.action_type == "artifact":
+        try:
+            result = artifact_trigger_result(ex, inj)
+        except ValueError as exc:
+            result = str(exc)
+            add_event(ex.id, "inject_failed", inj.title, result)
+            raise HTTPException(400, result) from exc
 
     mark_inject_triggered(inject_id)
     detail = f"Audience: {inj.audience}\nAction: {inj.action_type}"
@@ -390,6 +428,174 @@ def save_exercise_playbook(
     return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
 
 
+@app.post("/exercises/{exercise_id}/playbooks/designer/validate")
+def validate_designer_playbook(
+    exercise_id: str,
+    playbook: dict = Body(...),
+):
+    ex = get_exercise(exercise_id)
+    if not ex:
+        raise HTTPException(404, "Exercise not found")
+    try:
+        normalized = validate_playbook_configuration(ex, playbook)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except ChaosPreflightError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except ChaosExecutionError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return JSONResponse({"valid": True, "playbook": normalized})
+
+
+@app.post("/exercises/{exercise_id}/playbooks/designer/save")
+def save_designer_playbook(
+    exercise_id: str,
+    playbook: dict = Body(...),
+):
+    ex = get_exercise(exercise_id)
+    if not ex:
+        raise HTTPException(404, "Exercise not found")
+    try:
+        normalized = save_playbook_configuration(ex, playbook)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except ChaosPreflightError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except ChaosExecutionError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    add_event(
+        ex.id,
+        "playbook_saved",
+        f"Playbook Saved: {normalized['name']}",
+        (
+            f"ID: {normalized['id']}\n"
+            f"Stages: {len(normalized['stages'])}\n"
+            "Source: visual designer"
+        ),
+    )
+    return JSONResponse({"saved": True, "playbook": normalized})
+
+
+@app.post("/exercises/{exercise_id}/playbooks/{playbook_id}/clone")
+def clone_exercise_playbook(
+    exercise_id: str,
+    playbook_id: str,
+    new_playbook_id: str = Form(...),
+    new_name: str = Form(...),
+):
+    ex = get_exercise(exercise_id)
+    if not ex:
+        raise HTTPException(404, "Exercise not found")
+    try:
+        clone = clone_playbook_configuration(
+            ex,
+            playbook_id,
+            new_playbook_id,
+            new_name,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except ChaosPreflightError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except ChaosExecutionError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    add_event(
+        ex.id,
+        "playbook_cloned",
+        f"Playbook Cloned: {clone['name']}",
+        f"Source: {playbook_id}\nClone: {clone['id']}",
+    )
+    return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
+
+
+@app.post("/exercises/{exercise_id}/playbooks/import")
+async def import_exercise_playbook(
+    exercise_id: str,
+    playbook_file: UploadFile = File(...),
+):
+    ex = get_exercise(exercise_id)
+    if not ex:
+        raise HTTPException(404, "Exercise not found")
+    filename = playbook_file.filename or ""
+    if not filename.lower().endswith((".yml", ".yaml")):
+        raise HTTPException(400, "Playbook import must be a YAML file")
+    content = await playbook_file.read(64 * 1024 + 1)
+    if len(content) > 64 * 1024:
+        raise HTTPException(400, "Playbook configuration is too large")
+    try:
+        configuration = content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(400, "Playbook must use UTF-8 encoding") from exc
+    try:
+        playbook = save_playbook_configuration(ex, configuration)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except ChaosPreflightError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except ChaosExecutionError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    add_event(
+        ex.id,
+        "playbook_imported",
+        f"Playbook Imported: {playbook['name']}",
+        f"File: {filename}\nID: {playbook['id']}",
+    )
+    return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
+
+
+@app.get("/exercises/{exercise_id}/playbooks/{playbook_id}/export.yml")
+def export_exercise_playbook(exercise_id: str, playbook_id: str):
+    ex = get_exercise(exercise_id)
+    if not ex:
+        raise HTTPException(404, "Exercise not found")
+    try:
+        configuration = export_playbook_configuration(ex, playbook_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return Response(
+        configuration,
+        media_type="application/yaml",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{playbook_id}.yml"'
+            )
+        },
+    )
+
+
+@app.post(
+    "/exercises/{exercise_id}/playbooks/{playbook_id}"
+    "/versions/{version_id}/restore"
+)
+def restore_exercise_playbook_version(
+    exercise_id: str,
+    playbook_id: str,
+    version_id: str,
+):
+    ex = get_exercise(exercise_id)
+    if not ex:
+        raise HTTPException(404, "Exercise not found")
+    try:
+        playbook = restore_playbook_version(
+            ex,
+            playbook_id,
+            version_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except ChaosPreflightError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except ChaosExecutionError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    add_event(
+        ex.id,
+        "playbook_restored",
+        f"Playbook Restored: {playbook['name']}",
+        f"Version: {version_id}",
+    )
+    return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
+
+
 @app.post("/exercises/{exercise_id}/playbooks/{playbook_id}/start")
 def start_exercise_playbook(exercise_id: str, playbook_id: str):
     ex = get_exercise(exercise_id)
@@ -471,6 +677,43 @@ def skip_exercise_playbook_stage(
         "playbook_stage_skipped",
         f"Playbook Stage Skipped: {stage['title']}",
         f"Run: {playbook_run_id}\nStage: {stage_id}",
+    )
+    return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
+
+
+@app.post("/exercises/{exercise_id}/artifacts")
+def create_exercise_artifact(
+    exercise_id: str,
+    title: str = Form(...),
+    audience: str = Form(...),
+    stage: str = Form(...),
+    artifact_kind: str = Form(...),
+    content: str = Form(...),
+):
+    ex = get_exercise(exercise_id)
+    if not ex:
+        raise HTTPException(404, "Exercise not found")
+    try:
+        inject = create_safe_artifact_inject(
+            ex,
+            title,
+            audience,
+            stage,
+            artifact_kind,
+            content,
+        )
+    except (OSError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    save_injects([inject])
+    add_event(
+        ex.id,
+        "artifact_created",
+        f"Safe Artifact Created: {inject.title}",
+        (
+            f"Type: {artifact_kind}\n"
+            f"Stage: {stage}\n"
+            f"Path: {inject.payload['artifact']}"
+        ),
     )
     return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
 

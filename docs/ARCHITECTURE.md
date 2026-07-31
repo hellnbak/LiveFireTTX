@@ -1,6 +1,6 @@
 # LiveFireTTX Architecture
 
-LiveFireTTX is intentionally local-first. Version 0.5 uses a FastAPI facilitator app, Jinja2 templates, SQLite persistence, an exercise-intelligence service, and generated Docker Compose labs with a separate chaos orchestration service.
+LiveFireTTX is intentionally local-first. Version 0.6 uses a FastAPI facilitator app, Jinja2 templates, SQLite persistence, exercise-intelligence and artifact services, and generated Docker Compose labs with a separate chaos orchestration service.
 
 ## Core flow
 
@@ -58,6 +58,27 @@ error, authentication, and DNS conditions. It also generates an after-action
 Markdown report and a ZIP evidence package containing Markdown, CSV, JSON state,
 and a manifest. Objective ratings and notes are persisted in SQLite, while
 generated reports are written into the exercise package under `reports/`.
+
+### Scenario Design Studio
+
+The visual designer edits the same playbook schema used by the generated chaos
+controller. Browser-side checks provide immediate feedback for IDs,
+dependencies, cycles, timing, and designed budget peaks. The controller remains
+the source of truth and performs the final allowlist and safety validation before
+save or launch.
+
+Playbook files are stored under `chaos/playbooks/`. When an accepted definition
+changes, the prior YAML is copied into an ID-scoped `history/` directory.
+Templates can be cloned, imported, exported, or restored without adding another
+database or bypassing controller validation.
+
+### Safe Artifact Designer
+
+`app/services/artifacts.py` creates facilitator-defined messages, alerts,
+tickets, and advisories under `artifacts/facilitator/`. Filenames are generated
+internally, content is size-limited, and every file is visibly marked as
+simulated. The resulting item is persisted as a normal artifact inject so its
+creation and trigger are included in the exercise event log and evidence export.
 
 ### Target Environment
 
