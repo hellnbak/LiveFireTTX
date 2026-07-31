@@ -282,8 +282,29 @@ def _chaos_inject(
         {
             "safe": True,
             "action": action,
+            "control_version": "0.3.0",
             "intensities": ["low", "medium", "high"],
             "default_intensity": "medium",
+            "durations": [60, 300, 600, 900],
+            "default_duration": 300,
+            "guardrail_profiles": {
+                "strict": {
+                    "max_latency_ms": 2500,
+                    "max_error_rate": 0.25,
+                    "abort_on_target_unreachable": True,
+                },
+                "standard": {
+                    "max_latency_ms": 5000,
+                    "max_error_rate": 0.5,
+                    "abort_on_target_unreachable": True,
+                },
+                "observe": {
+                    "max_latency_ms": 10000,
+                    "max_error_rate": 1.0,
+                    "abort_on_target_unreachable": False,
+                },
+            },
+            "default_guardrail_profile": "standard",
         },
         "chaos_cli.py",
     )
@@ -337,11 +358,13 @@ def render_exercise_package(
 
             ## Facilitator Notes
             Use the LiveFireTTX console to trigger narrative injects and safe chaos
-            actions. Chaos actions support low, medium, and high intensity, can be
-            repeated, and can be reset without rebuilding the lab.
+            actions. Chaos runs support low, medium, and high intensity, bounded
+            durations, target preflight checks, automatic rollback, and configurable
+            stop conditions.
 
             The generated control API is available at `http://127.0.0.1:8090/docs`
-            after deploying the target environment.
+            after deploying the target environment. Use the emergency stop whenever
+            observed impact exceeds the exercise plan.
             """
         )
     )

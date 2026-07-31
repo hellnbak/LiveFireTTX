@@ -27,7 +27,10 @@ from app.models import (
 from app.services.generator import create_exercise_from_request
 from app.services.runtime import (
     ChaosExecutionError,
+    ChaosPreflightError,
+    emergency_stop,
     read_chaos_state,
+    read_control_status,
     reset_chaos,
     run_chaos_inject,
 )
@@ -123,12 +126,18 @@ def exercise_detail(request: Request, exercise_id: str):
             "injects_by_stage": by_stage,
             "events": events,
             "chaos_state": read_chaos_state(ex),
+            "control_status": read_control_status(ex),
         },
     )
 
 
 @app.post("/injects/{inject_id}/trigger")
-def trigger_inject(inject_id: str, intensity: str = Form("medium")):
+def trigger_inject(
+    inject_id: str,
+    intensity: str = Form("medium"),
+    duration_seconds: int = Form(300),
+    guardrail_profile: str = Form("standard"),
+):
     inj = get_inject(inject_id)
     if not inj:
         raise HTTPException(404, "Inject not found")
@@ -141,11 +150,21 @@ def trigger_inject(inject_id: str, intensity: str = Form("medium")):
     result = "Triggered narrative/artifact inject."
     if inj.action_type == "chaos_script":
         try:
-            result = run_chaos_inject(ex, inj, intensity)
+            result = run_chaos_inject(
+                ex,
+                inj,
+                intensity,
+                duration_seconds,
+                guardrail_profile,
+            )
         except ValueError as exc:
             result = str(exc)
             add_event(ex.id, "inject_failed", inj.title, result)
             raise HTTPException(400, result) from exc
+        except ChaosPreflightError as exc:
+            result = str(exc)
+            add_event(ex.id, "inject_preflight_failed", inj.title, result)
+            raise HTTPException(503, result) from exc
         except ChaosExecutionError as exc:
             result = str(exc)
             add_event(ex.id, "inject_failed", inj.title, result)
@@ -154,7 +173,11 @@ def trigger_inject(inject_id: str, intensity: str = Form("medium")):
     mark_inject_triggered(inject_id)
     detail = f"Audience: {inj.audience}\nAction: {inj.action_type}"
     if inj.action_type == "chaos_script":
-        detail += f"\nIntensity: {intensity}"
+        detail += (
+            f"\nIntensity: {intensity}"
+            f"\nDuration: {duration_seconds} seconds"
+            f"\nGuardrails: {guardrail_profile}"
+        )
     add_event(ex.id, "inject_triggered", inj.title, f"{detail}\n{result}")
     return RedirectResponse(f"/exercises/{inj.exercise_id}", status_code=303)
 
@@ -166,12 +189,40 @@ def reset_exercise_chaos(exercise_id: str, action: str = Form("")):
         raise HTTPException(404, "Exercise not found")
     try:
         result = reset_chaos(ex, action or None)
+    except ChaosPreflightError as exc:
+        add_event(ex.id, "chaos_reset_failed", "Chaos Reset Failed", str(exc))
+        raise HTTPException(503, str(exc)) from exc
     except ChaosExecutionError as exc:
         add_event(ex.id, "chaos_reset_failed", "Chaos Reset Failed", str(exc))
         raise HTTPException(500, str(exc)) from exc
 
     label = action or "all actions"
     add_event(ex.id, "chaos_reset", "Chaos State Reset", f"Reset: {label}\n{result}")
+    return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
+
+
+@app.post("/exercises/{exercise_id}/chaos/emergency-stop")
+def emergency_stop_exercise_chaos(exercise_id: str):
+    ex = get_exercise(exercise_id)
+    if not ex:
+        raise HTTPException(404, "Exercise not found")
+    try:
+        result = emergency_stop(ex)
+    except ChaosExecutionError as exc:
+        add_event(
+            ex.id,
+            "chaos_emergency_stop_failed",
+            "Emergency Stop Failed",
+            str(exc),
+        )
+        raise HTTPException(503, str(exc)) from exc
+
+    add_event(
+        ex.id,
+        "chaos_emergency_stop",
+        "Emergency Stop",
+        result,
+    )
     return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
 
 

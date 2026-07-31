@@ -1,0 +1,567 @@
+from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+import json
+import os
+import uuid
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+
+
+CONTROL_VERSION = "0.3.0"
+ROOT = Path(__file__).resolve().parent
+STATE_DIR = Path(os.environ.get("LIVEFIRE_STATE_DIR", ROOT / "state"))
+ARTIFACTS_DIR = Path(
+    os.environ.get("LIVEFIRE_ARTIFACTS_DIR", ROOT.parent / "artifacts")
+)
+STATE_PATH = STATE_DIR / "state.json"
+LOCK_PATH = STATE_DIR / "state.lock"
+ALLOWED_ACTIONS = set(__ALLOWED_ACTIONS__)
+INTENSITY_PROFILES = {
+    "low": {"rate": 0.2, "latency_ms": 400, "error_rate": 0.02, "count": 3},
+    "medium": {"rate": 0.6, "latency_ms": 1500, "error_rate": 0.15, "count": 6},
+    "high": {"rate": 1.0, "latency_ms": 3000, "error_rate": 0.4, "count": 10},
+}
+ACTION_CATALOG = {
+    "app_degradation": {
+        "label": "Application Degradation",
+        "description": "Adds controlled latency and intermittent synthetic errors.",
+        "reversible": True,
+    },
+    "auth_failure": {
+        "label": "Authentication Failure",
+        "description": "Makes the simulated login endpoint fail at a controlled rate.",
+        "reversible": True,
+    },
+    "backup_restore_delay": {
+        "label": "Backup Restore Delay",
+        "description": "Marks backup freshness and restore timing as uncertain.",
+        "reversible": True,
+    },
+    "data_corruption": {
+        "label": "Test Data Integrity Failure",
+        "description": "Returns inconsistent values in seeded, non-sensitive test records.",
+        "reversible": True,
+    },
+    "dependency_alert": {
+        "label": "Dependency Integrity Alert",
+        "description": "Blocks the simulated build and creates a vendor advisory.",
+        "reversible": True,
+    },
+    "dns_failure": {
+        "label": "Dependency DNS Failure",
+        "description": "Makes the simulated DNS dependency fail at a controlled rate.",
+        "reversible": True,
+    },
+    "safe_file_impact": {
+        "label": "Safe File Impact",
+        "description": "Renames generated test files and creates a simulated note.",
+        "reversible": True,
+    },
+    "synthetic_edr_alert": {
+        "label": "Synthetic EDR Alerts",
+        "description": "Creates safe alerts without executing malicious behavior.",
+        "reversible": True,
+    },
+}
+DEFAULT_CONDITIONS = {
+    "latency_ms": 0,
+    "error_rate": 0.0,
+    "auth_failure_rate": 0.0,
+    "dns_failure_rate": 0.0,
+    "data_integrity": False,
+    "backup_delay": False,
+    "build_blocked": False,
+    "file_impact": False,
+}
+ACTION_FIELDS = {
+    "app_degradation": ("latency_ms", "error_rate"),
+    "auth_failure": ("auth_failure_rate",),
+    "backup_restore_delay": ("backup_delay",),
+    "data_corruption": ("data_integrity",),
+    "dependency_alert": ("build_blocked",),
+    "dns_failure": ("dns_failure_rate",),
+    "safe_file_impact": ("file_impact",),
+    "synthetic_edr_alert": (),
+}
+
+
+def timestamp(value=None):
+    current = value or datetime.now(timezone.utc)
+    return current.astimezone(timezone.utc).isoformat()
+
+
+def parse_timestamp(value):
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def default_state():
+    return {
+        "schema_version": 3,
+        "control_version": CONTROL_VERSION,
+        "revision": 0,
+        "updated_at": timestamp(),
+        "active_actions": {},
+        "conditions": dict(DEFAULT_CONDITIONS),
+        "runs": [],
+        "history": [],
+    }
+
+
+def normalize_state(state):
+    if "conditions" not in state:
+        legacy = state
+        state = default_state()
+        state["conditions"].update(
+            {
+                "latency_ms": 1500 if legacy.get("degraded") else 0,
+                "auth_failure_rate": 1.0 if legacy.get("auth_failure") else 0.0,
+                "dns_failure_rate": 1.0 if legacy.get("dns_failure") else 0.0,
+            }
+        )
+
+    state["conditions"] = {
+        **DEFAULT_CONDITIONS,
+        **state.get("conditions", {}),
+    }
+    state.setdefault("active_actions", {})
+    state.setdefault("runs", [])
+    state.setdefault("history", [])
+    state.setdefault("revision", 0)
+    state.setdefault("updated_at", timestamp())
+    state["schema_version"] = 3
+    state["control_version"] = CONTROL_VERSION
+
+    known_run_ids = {run.get("id") for run in state["runs"]}
+    for action, active in state["active_actions"].items():
+        active.setdefault("run_id", f"legacy_{action}")
+        active.setdefault("action", action)
+        active.setdefault("duration_seconds", None)
+        active.setdefault("expires_at", None)
+        active.setdefault("stop_conditions", {})
+        active.setdefault(
+            "effect",
+            {
+                field: state["conditions"].get(field, DEFAULT_CONDITIONS[field])
+                for field in ACTION_FIELDS.get(action, ())
+            },
+        )
+        if active["run_id"] not in known_run_ids:
+            state["runs"].append(
+                {
+                    "id": active["run_id"],
+                    "action": action,
+                    "intensity": active.get("intensity", "medium"),
+                    "status": "active",
+                    "requested_at": active.get("applied_at", state["updated_at"]),
+                    "started_at": active.get("applied_at", state["updated_at"]),
+                    "duration_seconds": active.get("duration_seconds"),
+                    "expires_at": active.get("expires_at"),
+                    "stop_conditions": active.get("stop_conditions", {}),
+                    "artifacts": active.get("artifacts", []),
+                    "observations": [],
+                }
+            )
+    state["runs"] = state["runs"][-100:]
+    return state
+
+
+def read_state_unlocked():
+    if not STATE_PATH.exists():
+        return default_state()
+    try:
+        return normalize_state(json.loads(STATE_PATH.read_text()))
+    except json.JSONDecodeError:
+        return default_state()
+
+
+def write_state_unlocked(state):
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    temporary = STATE_PATH.with_suffix(f".{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(state, indent=2, sort_keys=True))
+    temporary.replace(STATE_PATH)
+
+
+@contextmanager
+def state_lock():
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    with LOCK_PATH.open("a+") as lock:
+        if fcntl:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if fcntl:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def available_actions():
+    return {
+        action: ACTION_CATALOG[action]
+        for action in sorted(ALLOWED_ACTIONS)
+        if action in ACTION_CATALOG
+    }
+
+
+def get_state():
+    with state_lock():
+        state = read_state_unlocked()
+        if reconcile_expired_unlocked(state):
+            commit_state(state)
+        return state
+
+
+def begin_run(
+    action,
+    intensity="medium",
+    duration_seconds=300,
+    stop_conditions=None,
+):
+    validate_request(action, intensity, duration_seconds, stop_conditions or {})
+    run = {
+        "id": f"run_{uuid.uuid4().hex[:12]}",
+        "action": action,
+        "intensity": intensity,
+        "status": "pending",
+        "requested_at": timestamp(),
+        "duration_seconds": int(duration_seconds),
+        "expires_at": None,
+        "stop_conditions": normalize_stop_conditions(stop_conditions or {}),
+        "artifacts": [],
+        "observations": [],
+    }
+    with state_lock():
+        state = read_state_unlocked()
+        state["runs"] = (state["runs"] + [run])[-100:]
+        commit_state(state)
+    return run
+
+
+def activate_run(run_id, before_snapshot=None):
+    with state_lock():
+        state = read_state_unlocked()
+        run = find_run(state, run_id)
+        if run["status"] != "pending":
+            raise ValueError(f"Run is not pending: {run_id}")
+
+        action = run["action"]
+        if action in state["active_actions"]:
+            finish_active_unlocked(
+                state,
+                action,
+                "aborted",
+                "replaced_by_new_run",
+            )
+
+        profile = INTENSITY_PROFILES[run["intensity"]]
+        effect = effect_for(action, profile)
+        artifacts = create_artifacts(action, run["intensity"], profile)
+        started_at = datetime.now(timezone.utc)
+        expires_at = started_at + timedelta(seconds=run["duration_seconds"])
+        run.update(
+            {
+                "status": "active",
+                "started_at": timestamp(started_at),
+                "expires_at": timestamp(expires_at),
+                "before_snapshot": before_snapshot,
+                "artifacts": artifacts,
+            }
+        )
+        state["active_actions"][action] = {
+            "run_id": run_id,
+            "action": action,
+            "intensity": run["intensity"],
+            "started_at": run["started_at"],
+            "duration_seconds": run["duration_seconds"],
+            "expires_at": run["expires_at"],
+            "stop_conditions": run["stop_conditions"],
+            "effect": effect,
+            "artifacts": artifacts,
+        }
+        recompute_conditions(state)
+        commit_state(state)
+        return run_result(state, run)
+
+
+def fail_run(run_id, reason, snapshot=None):
+    with state_lock():
+        state = read_state_unlocked()
+        run = find_run(state, run_id)
+        if run["status"] != "pending":
+            raise ValueError(f"Run is not pending: {run_id}")
+        run.update(
+            {
+                "status": "failed",
+                "ended_at": timestamp(),
+                "reason": reason,
+                "before_snapshot": snapshot,
+            }
+        )
+        commit_state(state)
+        return run
+
+
+def observe_run(run_id, phase, snapshot):
+    with state_lock():
+        state = read_state_unlocked()
+        run = find_run(state, run_id)
+        observation = {
+            "phase": phase,
+            "at": timestamp(),
+            "snapshot": snapshot,
+        }
+        run["observations"] = (run.get("observations", []) + [observation])[-20:]
+        active = state["active_actions"].get(run["action"])
+        if active and active.get("run_id") == run_id:
+            active["last_observation"] = observation
+        commit_state(state)
+        return observation
+
+
+def reconcile_expired(now=None):
+    current = parse_timestamp(now) if isinstance(now, str) else now
+    with state_lock():
+        state = read_state_unlocked()
+        if reconcile_expired_unlocked(state, current):
+            commit_state(state)
+        return state
+
+
+def reconcile_expired_unlocked(state, now=None):
+    current = now or datetime.now(timezone.utc)
+    expired_actions = [
+        action
+        for action, active in state["active_actions"].items()
+        if active.get("expires_at")
+        and parse_timestamp(active["expires_at"]) <= current
+    ]
+    for action in expired_actions:
+        finish_active_unlocked(state, action, "completed", "duration_elapsed")
+    if expired_actions:
+        recompute_conditions(state)
+    return bool(expired_actions)
+
+
+def abort(action=None, reason="manual_stop"):
+    if action and (action not in ALLOWED_ACTIONS or action not in ACTION_CATALOG):
+        raise ValueError(f"Action is not available for this exercise: {action}")
+    with state_lock():
+        state = read_state_unlocked()
+        selected = [action] if action else list(state["active_actions"])
+        stopped = []
+        for active_action in selected:
+            if active_action in state["active_actions"]:
+                finish_active_unlocked(
+                    state,
+                    active_action,
+                    "aborted",
+                    reason,
+                )
+                stopped.append(active_action)
+        recompute_conditions(state)
+        state["last_stop"] = {
+            "at": timestamp(),
+            "reason": reason,
+            "actions": stopped,
+        }
+        commit_state(state)
+        return {
+            "ok": True,
+            "stopped": stopped,
+            "reason": reason,
+            "revision": state["revision"],
+            "conditions": state["conditions"],
+        }
+
+
+def reset(action=None):
+    result = abort(action, "manual_reset")
+    result["reset"] = action or "all"
+    return result
+
+
+def validate_request(action, intensity, duration_seconds, stop_conditions):
+    if action not in ALLOWED_ACTIONS or action not in ACTION_CATALOG:
+        raise ValueError(f"Action is not available for this exercise: {action}")
+    if intensity not in INTENSITY_PROFILES:
+        raise ValueError(f"Unsupported intensity: {intensity}")
+    if not 15 <= int(duration_seconds) <= 3600:
+        raise ValueError("Duration must be between 15 and 3600 seconds")
+    normalize_stop_conditions(stop_conditions)
+
+
+def normalize_stop_conditions(stop_conditions):
+    normalized = {
+        "max_latency_ms": int(stop_conditions.get("max_latency_ms", 5000)),
+        "max_error_rate": float(stop_conditions.get("max_error_rate", 0.5)),
+        "abort_on_target_unreachable": bool(
+            stop_conditions.get("abort_on_target_unreachable", True)
+        ),
+    }
+    if not 100 <= normalized["max_latency_ms"] <= 10000:
+        raise ValueError("max_latency_ms must be between 100 and 10000")
+    if not 0 <= normalized["max_error_rate"] <= 1:
+        raise ValueError("max_error_rate must be between 0 and 1")
+    return normalized
+
+
+def effect_for(action, profile):
+    effects = {
+        "app_degradation": {
+            "latency_ms": profile["latency_ms"],
+            "error_rate": profile["error_rate"],
+        },
+        "auth_failure": {"auth_failure_rate": profile["rate"]},
+        "backup_restore_delay": {"backup_delay": True},
+        "data_corruption": {"data_integrity": True},
+        "dependency_alert": {"build_blocked": True},
+        "dns_failure": {"dns_failure_rate": profile["rate"]},
+        "safe_file_impact": {"file_impact": True},
+        "synthetic_edr_alert": {},
+    }
+    return effects[action]
+
+
+def recompute_conditions(state):
+    conditions = dict(DEFAULT_CONDITIONS)
+    for active in state["active_actions"].values():
+        for field, value in active.get("effect", {}).items():
+            if isinstance(value, bool):
+                conditions[field] = conditions[field] or value
+            else:
+                conditions[field] = max(conditions[field], value)
+    state["conditions"] = conditions
+
+
+def finish_active_unlocked(state, action, status, reason):
+    active = state["active_actions"].pop(action, None)
+    if not active:
+        return
+    reverse_effect(action)
+    run = find_run(state, active["run_id"])
+    run.update(
+        {
+            "status": status,
+            "ended_at": timestamp(),
+            "reason": reason,
+        }
+    )
+
+
+def find_run(state, run_id):
+    for run in reversed(state["runs"]):
+        if run.get("id") == run_id:
+            return run
+    raise ValueError(f"Run not found: {run_id}")
+
+
+def commit_state(state):
+    state["revision"] += 1
+    state["updated_at"] = timestamp()
+    state["runs"] = state["runs"][-100:]
+    write_state_unlocked(state)
+
+
+def run_result(state, run):
+    return {
+        "ok": True,
+        "run_id": run["id"],
+        "action": run["action"],
+        "intensity": run["intensity"],
+        "status": run["status"],
+        "duration_seconds": run["duration_seconds"],
+        "expires_at": run["expires_at"],
+        "stop_conditions": run["stop_conditions"],
+        "revision": state["revision"],
+        "artifacts": run["artifacts"],
+        "conditions": state["conditions"],
+    }
+
+
+def reverse_effect(action):
+    if action != "safe_file_impact":
+        return
+    artifact_root = ARTIFACTS_DIR / "chaos"
+    for lab in artifact_root.glob("*_safe_file_impact"):
+        for locked_file in lab.glob("*.locked"):
+            original = locked_file.with_suffix("")
+            if not original.exists():
+                locked_file.rename(original)
+
+
+def create_artifacts(action, intensity, profile):
+    artifact_root = ARTIFACTS_DIR / "chaos"
+    artifact_root.mkdir(parents=True, exist_ok=True)
+    label = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+
+    if action == "safe_file_impact":
+        lab = artifact_root / f"{label}_safe_file_impact"
+        lab.mkdir()
+        for index in range(1, profile["count"] + 1):
+            path = lab / f"test_file_{index}.txt"
+            path.write_text("Harmless generated test data for LiveFireTTX.\n")
+            path.rename(path.with_suffix(".txt.locked"))
+        (lab / "RANSOM_NOTE_SIMULATED.txt").write_text(
+            "SIMULATED EXERCISE ARTIFACT ONLY. No encryption occurred.\n"
+        )
+        return [artifact_reference(lab)]
+
+    suffix = "json" if action == "synthetic_edr_alert" else "md"
+    path = artifact_root / f"{label}_{action}.{suffix}"
+    if action == "synthetic_edr_alert":
+        content = {
+            "source": "LiveFireTTX synthetic EDR",
+            "severity": intensity,
+            "count": profile["count"],
+            "title": "Suspicious process behavior detected",
+            "detail": "Synthetic alert only. No malware or exploit code was executed.",
+            "created_at": timestamp(),
+        }
+        path.write_text(json.dumps(content, indent=2))
+    else:
+        path.write_text(artifact_markdown(action, intensity, profile))
+    return [artifact_reference(path)]
+
+
+def artifact_markdown(action, intensity, profile):
+    messages = {
+        "app_degradation": (
+            f"Latency is {profile['latency_ms']} ms with a "
+            f"{profile['error_rate']:.0%} synthetic error rate."
+        ),
+        "auth_failure": (
+            f"The simulated identity provider fails approximately "
+            f"{profile['rate']:.0%} of login requests."
+        ),
+        "backup_restore_delay": (
+            "Last-known-good backup freshness is uncertain and the "
+            "simulated restore ETA has increased."
+        ),
+        "data_corruption": (
+            "Seeded test order records no longer reconcile with payment totals."
+        ),
+        "dependency_alert": (
+            "A simulated vendor advisory has blocked the generated build status."
+        ),
+        "dns_failure": (
+            f"The simulated DNS dependency fails approximately "
+            f"{profile['rate']:.0%} of checks."
+        ),
+    }
+    title = ACTION_CATALOG[action]["label"]
+    return (
+        f"# {title}\n\n"
+        f"Intensity: **{intensity}**\n\n"
+        f"{messages[action]}\n\n"
+        "This is a safe LiveFireTTX exercise artifact.\n"
+    )
+
+
+def artifact_reference(path):
+    try:
+        return str(path.relative_to(ARTIFACTS_DIR.parent))
+    except ValueError:
+        return str(path)

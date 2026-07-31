@@ -22,14 +22,26 @@
 - Localhost-only generated service bindings
 - Automated smoke tests for every generated scenario package
 
-## Next: chaos orchestration
+## v0.3 Guarded chaos runs
 
-- Duration and automatic rollback for chaos actions
+- Target and controller preflight checks
+- Bounded run durations with automatic rollback
+- Pending, active, completed, aborted, and failed lifecycle states
+- Strict, standard, and observe guardrail profiles
+- Latency, error-rate, availability, and exercise-identity stop conditions
+- Before/after and periodic target observations
+- Facilitator emergency stop
+- Target-side expiration when the controller is unavailable
+
+## Next: v0.4 chaos orchestration
+
 - Multi-step chaos sequences and saved playbooks
-- Health probes with guardrails and stop conditions
-- Timer-based optional inject scheduling
+- Timer-based inject and action scheduling
+- Playbook pause, resume, skip, and emergency-stop controls
+- Health-gated transitions between playbook stages
+- Scenario-specific reusable playbook templates
+- Richer observed-impact charts and telemetry
 - Facilitator-defined safe artifact injects
-- Richer action telemetry and observed-impact capture
 - Additional simulated service dependencies
 
 ## Near-term exercise workflow

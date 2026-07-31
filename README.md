@@ -2,7 +2,7 @@
 
 LiveFireTTX is a local-first application for building and running live-fire tabletop exercises. It helps facilitators generate a scenario-specific target environment, a safe chaos control plane, inject options, exercise artifacts, and a web console where the tabletop leader can steer the exercise.
 
-> **Status:** v0.2 prototype. Use only in controlled lab environments.
+> **Status:** v0.3 prototype. Use only in controlled lab environments.
 
 ## What it does
 
@@ -11,7 +11,10 @@ LiveFireTTX is a local-first application for building and running live-fire tabl
 - Builds a local Docker Compose target environment
 - Builds a scenario-scoped chaos API and CLI for controlled simulation
 - Provides a facilitator inject console
-- Lets the exercise leader choose chaos intensity, repeat actions, and reset state
+- Runs target preflight checks before every guarded chaos action
+- Lets the exercise leader choose intensity, duration, and guardrail profile
+- Automatically rolls back expired actions or runs that exceed stop conditions
+- Provides reset and emergency-stop controls
 - Makes the generated target respond to latency, error, auth, DNS, backup, build, and data-integrity conditions
 - Supports multiple inject/chaos options per exercise stage
 - Logs facilitator actions, inject triggers, and manual notes
@@ -94,9 +97,10 @@ The same scenario-scoped controls are available from the generated package:
 ```bash
 cd generated/exercises/<exercise-id>/chaos
 python3 chaos_cli.py list
-python3 chaos_cli.py run app_degradation --intensity medium
+python3 chaos_cli.py preflight
+python3 chaos_cli.py run app_degradation --intensity medium --duration 300
 python3 chaos_cli.py state
-python3 chaos_cli.py reset
+python3 chaos_cli.py stop
 ```
 
 Cleanup:
