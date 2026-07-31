@@ -7,7 +7,11 @@
       <p><strong>{{ exercise.scenario_type }}</strong> · {{ exercise.business_system }} · {{ exercise.platform }} · {{ exercise.duration_minutes }} minutes</p>
       <p><code>{{ exercise.package_path }}</code></p>
     </div>
-    <a class="button" href="/exercises/{{ exercise.id }}/download">Download Package</a>
+    <div class="actions">
+      <a class="button" href="http://127.0.0.1:8088" target="_blank" rel="noreferrer">Open Target</a>
+      <a class="button" href="http://127.0.0.1:8090/docs" target="_blank" rel="noreferrer">Chaos API</a>
+      <a class="button" href="/exercises/{{ exercise.id }}/download">Download Package</a>
+    </div>
   </div>
 </section>
 
@@ -23,18 +27,66 @@
 </section>
 
 <section class="card wide">
+  <div class="row between">
+    <div>
+      <p class="eyebrow">Safe Chaos Control</p>
+      <h3>Simulation State</h3>
+      <p class="muted">Actions are scoped to this generated exercise, support three intensity levels, and can be repeated or reset.</p>
+    </div>
+    <form class="inline-form" action="/exercises/{{ exercise.id }}/chaos/reset" method="post">
+      <button class="button warning" type="submit">Reset All Chaos</button>
+    </form>
+  </div>
+  {% if chaos_state and chaos_state.get('conditions') %}
+    <div class="state-summary">
+      <span class="pill">Revision {{ chaos_state.get('revision', 0) }}</span>
+      {% if chaos_state.get('active_actions') %}
+        {% for action, detail in chaos_state.get('active_actions', {}).items() %}
+          <span class="pill active">{{ action|replace('_', ' ') }} · {{ detail.get('intensity', 'medium') }}</span>
+        {% endfor %}
+      {% else %}
+        <span class="pill healthy">No active chaos</span>
+      {% endif %}
+    </div>
+    <div class="condition-grid">
+      {% for condition, value in chaos_state.get('conditions', {}).items() %}
+        <div class="condition {{ 'active' if value else '' }}">
+          <span>{{ condition|replace('_', ' ') }}</span>
+          <strong>{{ value }}</strong>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted">State is unavailable. Regenerate this exercise to use the v0.2 chaos controller.</p>
+  {% endif %}
+</section>
+
+<section class="card wide">
   <h3>Facilitator Inject Console</h3>
-  <p>Each stage can have multiple options. The exercise leader chooses which inject or chaos action to trigger.</p>
+  <p>Choose narrative injects or apply safe chaos actions at the intensity needed for the room.</p>
   {% for stage, injects in injects_by_stage.items() %}
     <div class="stage">
-      <h4>{{ stage }}</h4>
+      <h4>{{ stage|replace('-', ' · ') }}</h4>
       <div class="inject-grid">
       {% for inj in injects %}
         <div class="inject {{ 'done' if inj.triggered else '' }}">
-          <div class="row between"><strong>{{ inj.title }}</strong><span>{{ inj.action_type }}</span></div>
+          <div class="row between"><strong>{{ inj.title }}</strong><span class="type-badge">{{ inj.action_type|replace('_', ' ') }}</span></div>
           <p>{{ inj.description }}</p>
           <small>Audience: {{ inj.audience }}</small>
-          {% if inj.triggered %}
+          {% if inj.action_type == 'chaos_script' %}
+            <form class="inject-controls" action="/injects/{{ inj.id }}/trigger" method="post">
+              <label for="intensity-{{ inj.id }}">Intensity</label>
+              <select id="intensity-{{ inj.id }}" name="intensity">
+                {% for level in inj.payload.get('intensities', ['medium']) %}
+                  <option value="{{ level }}" {{ 'selected' if level == inj.payload.get('default_intensity', 'medium') else '' }}>{{ level|title }}</option>
+                {% endfor %}
+              </select>
+              <button class="button primary" type="submit">{{ 'Run Again' if inj.triggered else 'Apply Chaos' }}</button>
+            </form>
+            {% if inj.triggered %}
+              <div class="status">Run {{ inj.trigger_count }} time{{ '' if inj.trigger_count == 1 else 's' }} · last at {{ inj.triggered_at }}</div>
+            {% endif %}
+          {% elif inj.triggered %}
             <div class="status">Triggered at {{ inj.triggered_at }}</div>
           {% else %}
             <form action="/injects/{{ inj.id }}/trigger" method="post"><button class="button primary" type="submit">Trigger Inject</button></form>

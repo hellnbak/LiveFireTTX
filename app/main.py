@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import subprocess
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
@@ -26,11 +25,18 @@ from app.models import (
     save_injects,
 )
 from app.services.generator import create_exercise_from_request
+from app.services.runtime import (
+    ChaosExecutionError,
+    read_chaos_state,
+    reset_chaos,
+    run_chaos_inject,
+)
 from app.version import __version__
 
 BASE = Path(__file__).resolve().parent
 app = FastAPI(title="LiveFireTTX", version=__version__)
 templates = Jinja2Templates(directory=str(BASE / "templates"))
+templates.env.globals["app_version"] = __version__
 app.mount("/static", StaticFiles(directory=str(BASE / "templates" / "static")), name="static")
 
 
@@ -60,6 +66,28 @@ def create_exercise(
     participants: str = Form("Incident Commander, Security Operations, Cloud/IT Operations, Communications, Business Owner"),
     objectives: str = Form(""),
 ):
+    name = name.strip()
+    business_system = business_system.strip()
+    if not name or len(name) > 120:
+        raise HTTPException(400, "Exercise name must be between 1 and 120 characters")
+    if scenario_type not in SCENARIO_LIBRARY:
+        raise HTTPException(400, "Unknown scenario type")
+    if platform != "local_docker":
+        raise HTTPException(400, "Only the local Docker platform is currently supported")
+    if difficulty not in {"beginner", "intermediate", "advanced"}:
+        raise HTTPException(400, "Unknown difficulty")
+    if not 15 <= duration_minutes <= 480:
+        raise HTTPException(400, "Duration must be between 15 and 480 minutes")
+    if not business_system or len(business_system) > 120:
+        raise HTTPException(400, "Business system must be between 1 and 120 characters")
+
+    participant_list = [p.strip() for p in participants.split(",") if p.strip()]
+    objective_list = [o.strip() for o in objectives.split("\n") if o.strip()]
+    if len(participant_list) > 25 or any(len(item) > 120 for item in participant_list):
+        raise HTTPException(400, "Participant list is too large")
+    if len(objective_list) > 20 or any(len(item) > 240 for item in objective_list):
+        raise HTTPException(400, "Objective list is too large")
+
     req = ExerciseCreate(
         name=name,
         scenario_type=scenario_type,
@@ -67,8 +95,8 @@ def create_exercise(
         business_system=business_system,
         difficulty=difficulty,
         duration_minutes=duration_minutes,
-        participants=[p.strip() for p in participants.split(",") if p.strip()],
-        objectives=[o.strip() for o in objectives.split("\n") if o.strip()],
+        participants=participant_list,
+        objectives=objective_list,
     )
     ex, injects = create_exercise_from_request(req)
     save_exercise(ex)
@@ -87,32 +115,64 @@ def exercise_detail(request: Request, exercise_id: str):
     by_stage = {}
     for i in injects:
         by_stage.setdefault(i.stage, []).append(i)
-    return templates.TemplateResponse("exercise.html", {"request": request, "exercise": ex, "injects_by_stage": by_stage, "events": events})
+    return templates.TemplateResponse(
+        "exercise.html",
+        {
+            "request": request,
+            "exercise": ex,
+            "injects_by_stage": by_stage,
+            "events": events,
+            "chaos_state": read_chaos_state(ex),
+        },
+    )
 
 
 @app.post("/injects/{inject_id}/trigger")
-def trigger_inject(inject_id: str):
+def trigger_inject(inject_id: str, intensity: str = Form("medium")):
     inj = get_inject(inject_id)
     if not inj:
         raise HTTPException(404, "Inject not found")
     ex = get_exercise(inj.exercise_id)
     if not ex:
         raise HTTPException(404, "Exercise not found")
+    if inj.triggered and inj.action_type != "chaos_script":
+        raise HTTPException(409, "Narrative inject has already been triggered")
 
     result = "Triggered narrative/artifact inject."
-    if inj.action_type == "chaos_script" and inj.script_name:
-        script = Path(ex.package_path) / "chaos" / inj.script_name
-        if not script.exists():
-            raise HTTPException(404, f"Chaos script not found: {inj.script_name}")
-        proc = subprocess.run(["python3", str(script)], cwd=str(script.parent), capture_output=True, text=True, timeout=15)
-        result = (proc.stdout or "") + (proc.stderr or "")
-        if proc.returncode != 0:
+    if inj.action_type == "chaos_script":
+        try:
+            result = run_chaos_inject(ex, inj, intensity)
+        except ValueError as exc:
+            result = str(exc)
             add_event(ex.id, "inject_failed", inj.title, result)
-            raise HTTPException(500, result)
+            raise HTTPException(400, result) from exc
+        except ChaosExecutionError as exc:
+            result = str(exc)
+            add_event(ex.id, "inject_failed", inj.title, result)
+            raise HTTPException(500, result) from exc
 
     mark_inject_triggered(inject_id)
-    add_event(ex.id, "inject_triggered", inj.title, f"Audience: {inj.audience}\nAction: {inj.action_type}\n{result}")
+    detail = f"Audience: {inj.audience}\nAction: {inj.action_type}"
+    if inj.action_type == "chaos_script":
+        detail += f"\nIntensity: {intensity}"
+    add_event(ex.id, "inject_triggered", inj.title, f"{detail}\n{result}")
     return RedirectResponse(f"/exercises/{inj.exercise_id}", status_code=303)
+
+
+@app.post("/exercises/{exercise_id}/chaos/reset")
+def reset_exercise_chaos(exercise_id: str, action: str = Form("")):
+    ex = get_exercise(exercise_id)
+    if not ex:
+        raise HTTPException(404, "Exercise not found")
+    try:
+        result = reset_chaos(ex, action or None)
+    except ChaosExecutionError as exc:
+        add_event(ex.id, "chaos_reset_failed", "Chaos Reset Failed", str(exc))
+        raise HTTPException(500, str(exc)) from exc
+
+    label = action or "all actions"
+    add_event(ex.id, "chaos_reset", "Chaos State Reset", f"Reset: {label}\n{result}")
+    return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
 
 
 @app.post("/exercises/{exercise_id}/events")

@@ -20,35 +20,35 @@ SCENARIO_LIBRARY: Dict[str, Dict[str, Any]] = {
         "label": "Ransomware / Business Interruption",
         "description": "A ransomware-like event impacts a business application and file storage.",
         "target_modules": ["mock_business_app", "postgres", "file_storage", "backup_snapshot", "synthetic_logging"],
-        "chaos_modules": ["safe_file_rename", "fake_ransom_note", "synthetic_edr_alert", "backup_restore_delay", "app_degradation"],
+        "chaos_modules": ["safe_file_impact", "synthetic_edr_alert", "backup_restore_delay"],
         "default_objectives": ["detect suspicious behavior", "declare incident severity", "contain affected service", "validate backups", "coordinate legal/comms"],
     },
     "cloud_outage": {
         "label": "Cloud / Regional Service Outage",
         "description": "A cloud dependency or regional component becomes unstable.",
         "target_modules": ["mock_business_app", "postgres", "cache", "health_checks", "synthetic_logging"],
-        "chaos_modules": ["app_degradation", "database_latency", "dns_failure", "customer_complaints"],
+        "chaos_modules": ["app_degradation", "dns_failure"],
         "default_objectives": ["assess business impact", "test failover decision", "validate monitoring", "communicate outage status"],
     },
     "supply_chain": {
         "label": "Supply Chain / Dependency Compromise",
         "description": "A suspicious dependency alert creates uncertainty around the build pipeline.",
         "target_modules": ["mock_repo", "dependency_manifest", "ci_cd_simulator", "mock_business_app", "synthetic_logging"],
-        "chaos_modules": ["dependency_alert", "failed_build", "suspicious_outbound_log", "vendor_advisory"],
+        "chaos_modules": ["dependency_alert"],
         "default_objectives": ["triage dependency risk", "decide rollback", "coordinate vendor notification", "protect build pipeline"],
     },
     "database_corruption": {
         "label": "Database Corruption / Restore Failure",
         "description": "Application data becomes inconsistent and restore status is uncertain.",
         "target_modules": ["mock_business_app", "postgres", "backup_snapshot", "synthetic_logging"],
-        "chaos_modules": ["corrupt_test_records", "backup_restore_delay", "replica_lag", "customer_complaints"],
+        "chaos_modules": ["data_corruption", "backup_restore_delay"],
         "default_objectives": ["measure RTO/RPO", "validate restore process", "communicate data integrity risk"],
     },
     "identity_outage": {
         "label": "Identity Provider Outage",
         "description": "SSO/authentication failures affect access to business-critical systems.",
         "target_modules": ["mock_business_app", "mock_sso", "break_glass_account", "synthetic_logging"],
-        "chaos_modules": ["auth_failure", "executive_access_issue", "break_glass_prompt", "customer_complaints"],
+        "chaos_modules": ["auth_failure"],
         "default_objectives": ["validate break-glass access", "triage SaaS dependency", "communicate access impact"],
     },
 }
@@ -95,6 +95,7 @@ class InjectOption:
     payload: Dict[str, Any]
     triggered: bool = False
     triggered_at: Optional[str] = None
+    trigger_count: int = 0
 
 
 def connect() -> sqlite3.Connection:
@@ -138,10 +139,19 @@ def init_db() -> None:
                 payload TEXT NOT NULL,
                 triggered INTEGER NOT NULL DEFAULT 0,
                 triggered_at TEXT,
+                trigger_count INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY(exercise_id) REFERENCES exercises(id)
             )
             """
         )
+        inject_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(inject_options)").fetchall()
+        }
+        if "trigger_count" not in inject_columns:
+            conn.execute(
+                "ALTER TABLE inject_options ADD COLUMN trigger_count INTEGER NOT NULL DEFAULT 0"
+            )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS run_events (
@@ -192,6 +202,7 @@ def row_to_inject(row: sqlite3.Row) -> InjectOption:
         payload=json.loads(row["payload"]),
         triggered=bool(row["triggered"]),
         triggered_at=row["triggered_at"],
+        trigger_count=row["trigger_count"],
     )
 
 
@@ -224,7 +235,20 @@ def save_injects(injects: List[InjectOption]) -> None:
         for inj in injects:
             conn.execute(
                 """
-                INSERT INTO inject_options VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO inject_options (
+                    id,
+                    exercise_id,
+                    stage,
+                    title,
+                    audience,
+                    description,
+                    action_type,
+                    script_name,
+                    payload,
+                    triggered,
+                    triggered_at,
+                    trigger_count
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     inj.id,
@@ -238,6 +262,7 @@ def save_injects(injects: List[InjectOption]) -> None:
                     json.dumps(inj.payload),
                     1 if inj.triggered else 0,
                     inj.triggered_at,
+                    inj.trigger_count,
                 ),
             )
         conn.commit()
@@ -270,7 +295,16 @@ def get_inject(inject_id: str) -> Optional[InjectOption]:
 def mark_inject_triggered(inject_id: str) -> None:
     now = datetime.utcnow().isoformat() + "Z"
     with connect() as conn:
-        conn.execute("UPDATE inject_options SET triggered = 1, triggered_at = ? WHERE id = ?", (now, inject_id))
+        conn.execute(
+            """
+            UPDATE inject_options
+            SET triggered = 1,
+                triggered_at = ?,
+                trigger_count = trigger_count + 1
+            WHERE id = ?
+            """,
+            (now, inject_id),
+        )
         conn.commit()
 
 

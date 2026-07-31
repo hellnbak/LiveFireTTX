@@ -1,6 +1,6 @@
 # Roadmap
 
-## MVP
+## v0.1 MVP
 
 - Local FastAPI app
 - Scenario builder
@@ -11,16 +11,35 @@
 - Run log
 - After-action report template
 
-## Near-term
+## v0.2 Safe chaos control
+
+- Scenario-scoped chaos control API and CLI
+- Low, medium, and high intensity profiles
+- Reversible state with per-action and full reset
+- Repeatable chaos actions from the facilitator console
+- Live chaos state and execution count in the console
+- Target endpoints that react to simulated conditions
+- Localhost-only generated service bindings
+- Automated smoke tests for every generated scenario package
+
+## Next: chaos orchestration
+
+- Duration and automatic rollback for chaos actions
+- Multi-step chaos sequences and saved playbooks
+- Health probes with guardrails and stop conditions
+- Timer-based optional inject scheduling
+- Facilitator-defined safe artifact injects
+- Richer action telemetry and observed-impact capture
+- Additional simulated service dependencies
+
+## Near-term exercise workflow
 
 - Export run logs to Markdown/CSV
 - Better scenario templates
 - Exercise scoring rubric
-- Timer-based optional inject scheduling
 - Role-specific participant views
 - Built-in sample data sets
 - Improved UI and branding
-- Automated smoke tests for generated packages
 
 ## Cloud / enterprise
 

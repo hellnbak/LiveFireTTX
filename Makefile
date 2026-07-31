@@ -1,10 +1,15 @@
-.PHONY: run clean smoke
+.PHONY: run clean smoke test
+
+PYTHON ?= python3
 
 run:
-	uvicorn app.main:app --reload
+	$(PYTHON) -m uvicorn app.main:app --reload
 
 smoke:
-	python -c "from app.main import app; assert app.title == 'LiveFireTTX'; print('Smoke test passed')"
+	$(PYTHON) -c "from app.main import app; assert app.title == 'LiveFireTTX'; print('Smoke test passed')"
+
+test:
+	$(PYTHON) -m unittest discover -s tests -v
 
 clean:
 	rm -rf generated livefirettx.db __pycache__ .pytest_cache
