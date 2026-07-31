@@ -1,4 +1,4 @@
-# v1.1 Release Checklist
+# v1.2 Release Checklist
 
 ## Code and Data
 
@@ -27,6 +27,11 @@
 - [ ] Clock start, pause, resume, complete, and reset transitions retain time.
 - [ ] Due narrative injects deliver once and pause with exercise time.
 - [ ] Scheduler-disabled startup retains schedules for manual delivery.
+- [ ] MSEL ordering, due-state, checkpoint completion, and objective links work.
+- [ ] Participant display reveals delivered information only.
+- [ ] Evaluator observations and corrective-action state persist and export.
+- [ ] Direct-host lifecycle controls use only the generated Compose package.
+- [ ] Container mode leaves one-click Docker controls disabled.
 - [ ] Evidence and after-action exports open successfully.
 - [ ] Cleanup removes generated Docker resources.
 
@@ -35,7 +40,7 @@
 - [ ] README quick start succeeds on a clean host.
 - [ ] Configuration and upgrade guides match actual behavior.
 - [ ] Safety and threat-model reviews are current.
-- [ ] Release security review covers the v1.1 scheduler and lifecycle delta.
+- [ ] Release security review covers the v1.2 operations and Docker-control delta.
 - [ ] Dependency and secret scanning show no unaccepted release blocker.
 - [ ] Documented security exceptions still match upstream package constraints.
 - [ ] No open critical or high-severity defects remain.
@@ -43,6 +48,6 @@
 ## Publication
 
 - [ ] Merge the release branch.
-- [ ] Create signed tag `v1.1.0`.
+- [ ] Create signed tag `v1.2.0`.
 - [ ] Confirm the release workflow publishes source and wheel artifacts.
 - [ ] Publish release notes and known limitations.

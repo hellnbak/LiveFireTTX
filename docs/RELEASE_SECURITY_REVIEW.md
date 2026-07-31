@@ -1,5 +1,35 @@
 # Release Security Review
 
+## v1.2 Exercise Operations Delta
+
+Date: 2026-07-31
+
+The v1.2 MSEL, role views, improvement planning, and direct-host lifecycle
+controls were reviewed with the following controls:
+
+- Schema migration 4 is additive and preserves existing exercises and packages.
+- MSEL checkpoints and corrective actions use bounded fields, validated
+  objective references, constrained states, and same-origin-protected POST
+  routes.
+- Participant status projections contain only delivered narrative and artifact
+  injects; future operations, chaos controls, notes, and evaluations are not
+  serialized.
+- Lab requests select from `deploy`, `validate`, and `destroy`; `launch` maps to
+  the fixed deploy operation and starts the existing facilitator clock only
+  after successful deployment.
+- The Docker binary is resolved locally, Compose paths derive from validated
+  exercise IDs, symlinks are rejected, subprocesses do not use a shell, and a
+  narrow environment allowlist and timeout are enforced.
+- Failed Docker output is retained only in local logs rather than returned in
+  public HTTP error detail.
+- Container deployment disables lifecycle controls and does not mount the host
+  Docker socket.
+- Migration, MSEL ordering, participant isolation, subprocess arguments, route
+  behavior, and evidence export are covered by automated tests.
+
+The local-only browser and controller boundary remains unchanged. Role views
+are workflow projections, not authenticated multi-user authorization.
+
 ## v1.1 Facilitator Operations Delta
 
 Date: 2026-07-31

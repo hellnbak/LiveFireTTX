@@ -70,6 +70,32 @@ class ExerciseIntelligenceTests(TestCase):
             events,
             state,
             [],
+            [
+                {
+                    "id": "imp_one",
+                    "title": "Update escalation path",
+                    "owner": "Incident Management",
+                    "due_date": "2026-02-01",
+                    "status": "open",
+                    "notes": "Define the decision owner.",
+                    "created_at": "2026-01-01T01:00:00Z",
+                    "completed_at": None,
+                }
+            ],
+            [
+                {
+                    "id": "chk_one",
+                    "title": "Decision review",
+                    "description": "Review impact.",
+                    "audience": "Incident Commander",
+                    "expected_action": "State the next decision.",
+                    "scheduled_offset_seconds": 600,
+                    "objective_index": 0,
+                    "status": "completed",
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "completed_at": "2026-01-01T00:10:00Z",
+                }
+            ],
         )
         markdown = render_evidence_markdown(
             exercise,
@@ -81,6 +107,9 @@ class ExerciseIntelligenceTests(TestCase):
         self.assertIn("- Lifecycle status: created", markdown)
         self.assertIn("- Recorded exercise time: 0 seconds", markdown)
         self.assertIn("## Chaos Run Comparison", markdown)
+        self.assertIn("## Improvement Plan", markdown)
+        self.assertIn("Update escalation path", markdown)
+        self.assertIn("Decision review", markdown)
         self.assertIn("app_degradation", markdown)
 
         payload = build_evidence_archive(
@@ -97,6 +126,8 @@ class ExerciseIntelligenceTests(TestCase):
                     "events.csv",
                     "chaos_runs.csv",
                     "objective_assessments.csv",
+                    "msel_checkpoints.csv",
+                    "improvement_actions.csv",
                     "chaos_state.json",
                 },
                 set(archive.namelist()),
@@ -104,7 +135,7 @@ class ExerciseIntelligenceTests(TestCase):
             events_csv = archive.read("events.csv").decode()
             self.assertIn("'=unsafe spreadsheet formula", events_csv)
             self.assertIn(
-                '"schema_version": 2',
+                '"schema_version": 3',
                 archive.read("manifest.json").decode(),
             )
             self.assertIn(

@@ -13,6 +13,7 @@
 - Facilitator application to generated controller on `127.0.0.1:8090`
 - Generated controller to generated target over the Docker network
 - Shared generated state and artifact volumes
+- Optional direct-host facilitator access to the local Docker CLI
 - Backup archives crossing the local filesystem boundary
 
 ## Primary Risks and Controls
@@ -48,12 +49,27 @@ Controls: automatic scheduling is limited to non-executable narrative injects,
 delivery is atomic and idempotent, pause/completion states block dispatch, and
 every schedule change and delivery is retained in the exercise event log.
 
+### Host Docker Control
+
+Controls: one-click lifecycle support is direct-host only and can be disabled;
+the application container does not mount the Docker socket. The service uses a
+fixed operation allowlist, a validated exercise-derived Compose path, symlink
+rejection, no shell invocation, a narrow environment allowlist, bounded output,
+and a timeout. Operators must still review generated packages before launch.
+
+### Participant Information Leakage
+
+Controls: the presentation status endpoint returns only basic exercise state,
+clock data, and already-delivered narrative or artifact injects. It excludes
+future injects, schedules, chaos controls, facilitator notes, evaluations,
+package paths, and improvement actions.
+
 ### Local Web Exposure
 
 Controls: documented localhost operation, container port binding to 127.0.0.1,
 trusted-host validation, same-origin enforcement for state changes, defensive
 response headers, request identifiers, and no v1 remote-controller
-configuration. v1.1 does not claim multi-user authentication; operators must
+configuration. v1.2 does not claim multi-user authentication; operators must
 not expose the facilitator application to untrusted networks.
 
 ## Out of Scope

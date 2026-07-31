@@ -47,6 +47,8 @@ class Settings:
     allow_container_host: bool
     scheduler_enabled: bool
     scheduler_interval_seconds: int
+    lab_controls_enabled: bool
+    lab_command_timeout_seconds: int
 
 
 def load_settings() -> Settings:
@@ -107,6 +109,11 @@ def load_settings() -> Settings:
         scheduler_interval_seconds=_positive_int(
             "LIVEFIRE_SCHEDULER_INTERVAL_SECONDS",
             2,
+        ),
+        lab_controls_enabled=_boolean("LIVEFIRE_LAB_CONTROLS_ENABLED", True),
+        lab_command_timeout_seconds=_positive_int(
+            "LIVEFIRE_LAB_COMMAND_TIMEOUT_SECONDS",
+            180,
         ),
     )
 

@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Run {{ exercise.name }} · LiveFireTTX{% endblock %}
+{% block content %}
+<section class="card wide run-header">
+  <div>
+    <p class="eyebrow">Facilitator Run Mode</p>
+    <h2>{{ exercise.name }}</h2>
+    <p>{{ exercise.business_system }} · {{ exercise.duration_minutes }} minutes · <code>{{ exercise.id }}</code></p>
+  </div>
+  <div class="actions">
+    <a class="button" href="/exercises/{{ exercise.id }}">Command Center</a>
+    <a class="button" href="/exercises/{{ exercise.id }}/present" target="_blank" rel="noreferrer">Participant Display</a>
+    <a class="button" href="/exercises/{{ exercise.id }}/evaluate">Evaluator Workspace</a>
+  </div>
+</section>
+
+<section id="run-clock" class="card wide run-clock" data-elapsed="{{ clock.elapsed_seconds }}" data-status="{{ clock.status }}">
+  <div class="run-clock-value"><span>Exercise Time</span><strong id="run-clock-value">{{ clock.elapsed_seconds // 60 }}:{{ '%02d'|format(clock.elapsed_seconds % 60) }}</strong><small id="run-clock-status">{{ clock.status }}</small></div>
+  <div class="clock-progress-shell"><div class="row between"><span id="run-clock-remaining">{{ clock.remaining_seconds // 60 }}:{{ '%02d'|format(clock.remaining_seconds % 60) }} remaining</span><span>{{ clock.progress_percent }}%</span></div><div class="clock-progress"><span id="run-clock-progress" style="width:{{ clock.progress_percent }}%"></span></div></div>
+  <div class="clock-controls actions">
+    {% if exercise.status == 'created' %}<form class="inline-form" action="/exercises/{{ exercise.id }}/clock/start?view=run" method="post"><button class="button primary" type="submit">Start</button></form>{% endif %}
+    {% if exercise.status == 'running' %}<form class="inline-form" action="/exercises/{{ exercise.id }}/clock/pause?view=run" method="post"><button class="button warning" type="submit">Pause</button></form>{% endif %}
+    {% if exercise.status == 'paused' %}<form class="inline-form" action="/exercises/{{ exercise.id }}/clock/resume?view=run" method="post"><button class="button primary" type="submit">Resume</button></form>{% endif %}
+    {% if exercise.status in ['running', 'paused'] %}<form class="inline-form" action="/exercises/{{ exercise.id }}/clock/complete?view=run" method="post"><button class="button" type="submit">Complete</button></form>{% endif %}
+    {% if exercise.status == 'completed' %}<form class="inline-form" action="/exercises/{{ exercise.id }}/clock/reset?view=run" method="post"><button class="button" type="submit">Reset</button></form>{% endif %}
+  </div>
+</section>
+
+<section class="card wide focus-operation" data-next-id="{{ run_of_show.next_entry.id if run_of_show.next_entry else '' }}" data-next-status="{{ run_of_show.next_entry.status if run_of_show.next_entry else 'complete' }}">
+  <div class="row between"><div><p class="eyebrow">Next Action</p><h3>{{ 'Run of Show Complete' if not run_of_show.next_entry else run_of_show.next_entry.title }}</h3></div><span class="pill {{ 'active' if run_of_show.next_entry and run_of_show.next_entry.status == 'due' else '' }}">{{ run_of_show.next_entry.status if run_of_show.next_entry else 'complete' }}</span></div>
+  {% if run_of_show.next_entry %}
+    {% set next = run_of_show.next_entry %}
+    <p class="focus-description">{{ next.description }}</p>
+    <div class="focus-meta"><span>T+{{ next.offset_seconds // 60 }} min</span><span>{{ next.kind|title }}</span><span>{{ next.audience }}</span>{% if next.objective_index is not none %}<span>Objective {{ next.objective_index + 1 }}</span>{% endif %}</div>
+    {% if next.expected_action %}<div class="expected-action"><strong>Expected participant action</strong><p>{{ next.expected_action }}</p></div>{% endif %}
+    <div class="actions">
+      {% if next.source == 'checkpoint' %}<form class="inline-form" action="/checkpoints/{{ next.id }}/complete" method="post"><button class="button primary" type="submit">Mark Checkpoint Complete</button></form>
+      {% elif next.kind in ['narrative', 'artifact'] %}<form class="inline-form" action="/injects/{{ next.id }}/trigger?view=run" method="post"><button class="button primary" type="submit">Deliver Now</button></form>
+      {% else %}<a class="button primary" href="/exercises/{{ exercise.id }}#inject-{{ next.id }}">Open Safe Chaos Control</a>{% endif %}
+    </div>
+  {% else %}<p>All scheduled items are complete or the remaining controls are manual.</p>{% endif %}
+</section>
+
+<section class="grid two run-support-grid">
+  <div class="card">
+    <div class="row between"><div><p class="eyebrow">Lab</p><h3>Environment</h3></div><span class="pill {{ 'healthy' if control_status.get('ready') else '' }}">{{ 'Ready' if control_status.get('ready') else 'Needs attention' }}</span></div>
+    <p>{{ 'One-click controls available.' if lab.can_control else 'Use generated package scripts from this runtime.' }}</p>
+    <div class="actions">
+      {% if lab.can_control and exercise.status == 'created' %}<form class="inline-form" action="/exercises/{{ exercise.id }}/lab/launch" method="post"><button class="button primary" type="submit">Launch Lab &amp; Start</button></form>{% endif %}
+      {% if lab.can_control %}<form class="inline-form" action="/exercises/{{ exercise.id }}/lab/validate" method="post"><button class="button" type="submit">Validate</button></form><form class="inline-form" action="/exercises/{{ exercise.id }}/lab/destroy" method="post"><button class="button warning" type="submit">Destroy</button></form>{% endif %}
+      <form class="inline-form" action="/exercises/{{ exercise.id }}/chaos/emergency-stop?view=run" method="post"><button class="button emergency" type="submit">Emergency Stop</button></form>
+    </div>
+  </div>
+  <div class="card">
+    <div class="row between"><div><p class="eyebrow">Progress</p><h3>Run Summary</h3></div><span class="pill">{{ run_of_show.completed_count }}/{{ run_of_show.entry_count }}</span></div>
+    <div class="operations-summary vertical"><span><strong>{{ run_of_show.due_count }}</strong> due now</span><span><strong>{{ 'on' if scheduler_enabled else 'off' }}</strong> narrative scheduler</span><span><strong>{{ 'online' if control_status.get('reachable') else 'offline' }}</strong> chaos controller</span></div>
+  </div>
+</section>
+
+<section class="card wide">
+  <div class="row between"><div><p class="eyebrow">MSEL</p><h3>Full Run of Show</h3></div><a class="button" href="/exercises/{{ exercise.id }}#inject-console">Edit in Command Center</a></div>
+  <div class="msel-list">
+    {% for entry in run_of_show.entries %}
+      <div class="msel-entry {{ entry.status }}"><span class="msel-time">{% if entry.offset_seconds is not none %}T+{{ entry.offset_seconds // 60 }}{% else %}Manual{% endif %}</span><div><strong>{{ entry.title }}</strong><small>{{ entry.kind|title }} · {{ entry.audience }}{% if entry.expected_action %} · {{ entry.expected_action }}{% endif %}</small></div><span class="pill {{ 'active' if entry.status == 'due' else '' }}">{{ entry.status }}</span><div class="msel-action">{% if entry.status not in ['completed', 'delivered', 'missed'] and entry.source == 'checkpoint' %}<form class="inline-form" action="/checkpoints/{{ entry.id }}/complete" method="post"><button class="button compact-button" type="submit">Complete</button></form>{% elif entry.status not in ['completed', 'delivered', 'missed'] and entry.kind in ['narrative', 'artifact'] %}<form class="inline-form" action="/injects/{{ entry.id }}/trigger?view=run" method="post"><button class="button compact-button" type="submit">Deliver</button></form>{% elif entry.kind == 'chaos' %}<a class="button compact-button" href="/exercises/{{ exercise.id }}#inject-{{ entry.id }}">Control</a>{% endif %}</div></div>
+    {% endfor %}
+  </div>
+</section>
+<script>
+(() => {
+  const format = (seconds) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  const refresh = async () => {
+    try {
+      const response = await fetch(`/exercises/{{ exercise.id }}/chaos/status`, {cache: "no-store"});
+      if (!response.ok) return;
+      const payload = await response.json();
+      const clock = payload.clock;
+      document.querySelector("#run-clock-value").textContent = format(clock.elapsed_seconds);
+      document.querySelector("#run-clock-status").textContent = clock.status;
+      document.querySelector("#run-clock-remaining").textContent = `${format(clock.remaining_seconds)} remaining`;
+      document.querySelector("#run-clock-progress").style.width = `${clock.progress_percent}%`;
+      const focus = document.querySelector(".focus-operation");
+      const next = payload.run_of_show.next_entry;
+      if ((next?.id || "") !== focus.dataset.nextId || (next?.status || "complete") !== focus.dataset.nextStatus) window.location.reload();
+    } catch (_) {}
+  };
+  setInterval(refresh, 2000);
+})();
+</script>
+{% endblock %}

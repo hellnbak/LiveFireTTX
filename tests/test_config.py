@@ -25,6 +25,8 @@ class ConfigurationTests(TestCase):
         self.assertEqual(expected_root / "backups", settings.backup_root)
         self.assertTrue(settings.scheduler_enabled)
         self.assertEqual(2, settings.scheduler_interval_seconds)
+        self.assertTrue(settings.lab_controls_enabled)
+        self.assertEqual(180, settings.lab_command_timeout_seconds)
 
     def test_data_root_sets_all_default_storage_paths(self) -> None:
         with patch.dict(
@@ -52,6 +54,8 @@ class ConfigurationTests(TestCase):
                 "LIVEFIRE_REQUEST_TIMEOUT_SECONDS": "7",
                 "LIVEFIRE_SCHEDULER_ENABLED": "false",
                 "LIVEFIRE_SCHEDULER_INTERVAL_SECONDS": "5",
+                "LIVEFIRE_LAB_CONTROLS_ENABLED": "false",
+                "LIVEFIRE_LAB_COMMAND_TIMEOUT_SECONDS": "90",
             },
             clear=True,
         ):
@@ -64,12 +68,16 @@ class ConfigurationTests(TestCase):
         self.assertEqual(7, settings.request_timeout_seconds)
         self.assertFalse(settings.scheduler_enabled)
         self.assertEqual(5, settings.scheduler_interval_seconds)
+        self.assertFalse(settings.lab_controls_enabled)
+        self.assertEqual(90, settings.lab_command_timeout_seconds)
 
     def test_rejects_invalid_scheduler_configuration(self) -> None:
         for environment in [
             {"LIVEFIRE_SCHEDULER_ENABLED": "sometimes"},
             {"LIVEFIRE_SCHEDULER_INTERVAL_SECONDS": "0"},
             {"LIVEFIRE_SCHEDULER_INTERVAL_SECONDS": "fast"},
+            {"LIVEFIRE_LAB_CONTROLS_ENABLED": "sometimes"},
+            {"LIVEFIRE_LAB_COMMAND_TIMEOUT_SECONDS": "0"},
         ]:
             with self.subTest(environment=environment):
                 with patch.dict("os.environ", environment, clear=True):

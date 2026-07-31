@@ -1,5 +1,19 @@
 # Upgrading
 
+## From v1.1 to v1.2
+
+1. Stop the facilitator application and create a backup.
+2. Install v1.2 with Python 3.11 or newer.
+3. Start the application once. Schema migration 4 adds MSEL checkpoint and
+   improvement-action tables without modifying existing exercise packages.
+4. Existing exercises retain their inject schedules but receive no automatic
+   default checkpoints. Add checkpoints from the command center as needed.
+5. Newly generated exercises include three objective-linked operational
+   checkpoints and expose Run, Presentation, and Evaluator views.
+6. Direct host installs enable fixed one-click Docker lifecycle controls by
+   default. Set `LIVEFIRE_LAB_CONTROLS_ENABLED=false` to require manual package
+   scripts. Application container deployments already disable these controls.
+
 ## From v1.0 to v1.1
 
 1. Stop the facilitator application and create a backup.

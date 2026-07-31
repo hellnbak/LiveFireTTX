@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}{{ exercise.name }} · Participant Display{% endblock %}
+{% block content %}
+<div class="presentation-shell">
+  <section class="presentation-heading"><p class="eyebrow">Live Exercise · Simulated</p><h2>{{ exercise.name }}</h2><p>{{ exercise.business_system }}</p></section>
+  <section class="presentation-clock"><span id="presentation-status">{{ snapshot.clock.status }}</span><strong id="presentation-time">{{ snapshot.clock.elapsed_seconds // 60 }}:{{ '%02d'|format(snapshot.clock.elapsed_seconds % 60) }}</strong><small>exercise time</small></section>
+  <section id="presentation-current" class="presentation-current {{ '' if snapshot.current_inject else 'empty' }}">
+    <p class="eyebrow">Current Inject</p>
+    <h3 id="presentation-title">{{ snapshot.current_inject.title if snapshot.current_inject else 'Waiting for the exercise to begin' }}</h3>
+    <p id="presentation-description">{{ snapshot.current_inject.description if snapshot.current_inject else 'The facilitator will release the opening situation brief.' }}</p>
+    <span id="presentation-audience">{{ snapshot.current_inject.audience if snapshot.current_inject else 'All Participants' }}</span>
+  </section>
+  <section class="card presentation-history"><h3>Released Information</h3><div id="presentation-history">{% for inject in snapshot.delivered_injects %}<article><strong>{{ inject.title }}</strong><p>{{ inject.description }}</p><small>{{ inject.audience }}</small></article>{% endfor %}</div></section>
+</div>
+<script>
+(() => {
+  const format = (seconds) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  const history = document.querySelector("#presentation-history");
+  const refresh = async () => {
+    try {
+      const response = await fetch(`/exercises/{{ exercise.id }}/present/status`, {cache: "no-store"});
+      if (!response.ok) return;
+      const payload = await response.json();
+      document.querySelector("#presentation-status").textContent = payload.clock.status;
+      document.querySelector("#presentation-time").textContent = format(payload.clock.elapsed_seconds);
+      const current = payload.current_inject;
+      document.querySelector("#presentation-title").textContent = current?.title || "Waiting for the next inject";
+      document.querySelector("#presentation-description").textContent = current?.description || "Continue working from the information already released.";
+      document.querySelector("#presentation-audience").textContent = current?.audience || "All Participants";
+      history.replaceChildren(...payload.delivered_injects.map((inject) => {
+        const article = document.createElement("article");
+        const title = document.createElement("strong");
+        const description = document.createElement("p");
+        const audience = document.createElement("small");
+        title.textContent = inject.title;
+        description.textContent = inject.description;
+        audience.textContent = inject.audience;
+        article.append(title, description, audience);
+        return article;
+      }));
+    } catch (_) {}
+  };
+  setInterval(refresh, 2000);
+})();
+</script>
+{% endblock %}

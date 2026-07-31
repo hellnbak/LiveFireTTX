@@ -16,7 +16,7 @@ from app.config import settings
 
 DB_PATH = settings.database_path
 GENERATED_ROOT = settings.generated_root
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 SCENARIO_LIBRARY: Dict[str, Dict[str, Any]] = {
@@ -220,6 +220,34 @@ class InjectOption:
     auto_deliver: bool = False
 
 
+@dataclass
+class ExerciseCheckpoint:
+    id: str
+    exercise_id: str
+    title: str
+    description: str
+    audience: str
+    expected_action: str
+    scheduled_offset_seconds: int
+    objective_index: Optional[int]
+    status: str
+    created_at: str
+    completed_at: Optional[str] = None
+
+
+@dataclass
+class ImprovementAction:
+    id: str
+    exercise_id: str
+    title: str
+    owner: str
+    due_date: Optional[str]
+    status: str
+    notes: str
+    created_at: str
+    completed_at: Optional[str] = None
+
+
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=5)
@@ -250,6 +278,7 @@ def init_db() -> None:
             1: _migration_1_initial_schema,
             2: _migration_2_trigger_count,
             3: _migration_3_facilitator_operations,
+            4: _migration_4_exercise_operations,
         }
         for version, migration in migrations.items():
             if version in applied:
@@ -369,6 +398,58 @@ def _migration_3_facilitator_operations(conn: sqlite3.Connection) -> None:
             )
 
 
+def _migration_4_exercise_operations(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS exercise_checkpoints (
+            id TEXT PRIMARY KEY,
+            exercise_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            audience TEXT NOT NULL,
+            expected_action TEXT NOT NULL,
+            scheduled_offset_seconds INTEGER NOT NULL
+                CHECK(scheduled_offset_seconds >= 0),
+            objective_index INTEGER CHECK(objective_index >= 0),
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK(status IN ('pending', 'completed')),
+            created_at TEXT NOT NULL,
+            completed_at TEXT,
+            FOREIGN KEY(exercise_id) REFERENCES exercises(id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_exercise_checkpoints_timeline
+        ON exercise_checkpoints(exercise_id, scheduled_offset_seconds, created_at)
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS improvement_actions (
+            id TEXT PRIMARY KEY,
+            exercise_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            owner TEXT NOT NULL,
+            due_date TEXT,
+            status TEXT NOT NULL DEFAULT 'open'
+                CHECK(status IN ('open', 'in_progress', 'completed')),
+            notes TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            completed_at TEXT,
+            FOREIGN KEY(exercise_id) REFERENCES exercises(id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_improvement_actions_exercise
+        ON improvement_actions(exercise_id, status, created_at)
+        """
+    )
+
+
 def database_schema_version() -> int:
     with connect() as conn:
         row = conn.execute(
@@ -444,6 +525,36 @@ def row_to_inject(row: sqlite3.Row) -> InjectOption:
         trigger_count=row["trigger_count"],
         scheduled_offset_seconds=row["scheduled_offset_seconds"],
         auto_deliver=bool(row["auto_deliver"]),
+    )
+
+
+def row_to_checkpoint(row: sqlite3.Row) -> ExerciseCheckpoint:
+    return ExerciseCheckpoint(
+        id=row["id"],
+        exercise_id=row["exercise_id"],
+        title=row["title"],
+        description=row["description"],
+        audience=row["audience"],
+        expected_action=row["expected_action"],
+        scheduled_offset_seconds=row["scheduled_offset_seconds"],
+        objective_index=row["objective_index"],
+        status=row["status"],
+        created_at=row["created_at"],
+        completed_at=row["completed_at"],
+    )
+
+
+def row_to_improvement_action(row: sqlite3.Row) -> ImprovementAction:
+    return ImprovementAction(
+        id=row["id"],
+        exercise_id=row["exercise_id"],
+        title=row["title"],
+        owner=row["owner"],
+        due_date=row["due_date"],
+        status=row["status"],
+        notes=row["notes"],
+        created_at=row["created_at"],
+        completed_at=row["completed_at"],
     )
 
 
@@ -749,3 +860,193 @@ def list_objective_assessments(exercise_id: str) -> List[sqlite3.Row]:
             """,
             (exercise_id,),
         ).fetchall()
+
+
+def create_checkpoint(
+    exercise_id: str,
+    *,
+    title: str,
+    description: str,
+    audience: str,
+    expected_action: str,
+    scheduled_offset_seconds: int,
+    objective_index: Optional[int],
+) -> ExerciseCheckpoint:
+    checkpoint = ExerciseCheckpoint(
+        id=new_id("chk"),
+        exercise_id=exercise_id,
+        title=title,
+        description=description,
+        audience=audience,
+        expected_action=expected_action,
+        scheduled_offset_seconds=scheduled_offset_seconds,
+        objective_index=objective_index,
+        status="pending",
+        created_at=timestamp(),
+    )
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO exercise_checkpoints (
+                id,
+                exercise_id,
+                title,
+                description,
+                audience,
+                expected_action,
+                scheduled_offset_seconds,
+                objective_index,
+                status,
+                created_at,
+                completed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                checkpoint.id,
+                checkpoint.exercise_id,
+                checkpoint.title,
+                checkpoint.description,
+                checkpoint.audience,
+                checkpoint.expected_action,
+                checkpoint.scheduled_offset_seconds,
+                checkpoint.objective_index,
+                checkpoint.status,
+                checkpoint.created_at,
+                checkpoint.completed_at,
+            ),
+        )
+        conn.commit()
+    return checkpoint
+
+
+def list_checkpoints(exercise_id: str) -> List[ExerciseCheckpoint]:
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM exercise_checkpoints
+            WHERE exercise_id = ?
+            ORDER BY scheduled_offset_seconds, created_at
+            """,
+            (exercise_id,),
+        ).fetchall()
+    return [row_to_checkpoint(row) for row in rows]
+
+
+def get_checkpoint(checkpoint_id: str) -> Optional[ExerciseCheckpoint]:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM exercise_checkpoints WHERE id = ?",
+            (checkpoint_id,),
+        ).fetchone()
+    return row_to_checkpoint(row) if row else None
+
+
+def complete_checkpoint(checkpoint_id: str) -> bool:
+    completed_at = timestamp()
+    with connect() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE exercise_checkpoints
+            SET status = 'completed', completed_at = ?
+            WHERE id = ? AND status = 'pending'
+            """,
+            (completed_at, checkpoint_id),
+        )
+        conn.commit()
+    return cursor.rowcount == 1
+
+
+def create_improvement_action(
+    exercise_id: str,
+    *,
+    title: str,
+    owner: str,
+    due_date: Optional[str],
+    notes: str,
+) -> ImprovementAction:
+    action = ImprovementAction(
+        id=new_id("imp"),
+        exercise_id=exercise_id,
+        title=title,
+        owner=owner,
+        due_date=due_date,
+        status="open",
+        notes=notes,
+        created_at=timestamp(),
+    )
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO improvement_actions (
+                id,
+                exercise_id,
+                title,
+                owner,
+                due_date,
+                status,
+                notes,
+                created_at,
+                completed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                action.id,
+                action.exercise_id,
+                action.title,
+                action.owner,
+                action.due_date,
+                action.status,
+                action.notes,
+                action.created_at,
+                action.completed_at,
+            ),
+        )
+        conn.commit()
+    return action
+
+
+def list_improvement_actions(exercise_id: str) -> List[ImprovementAction]:
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM improvement_actions
+            WHERE exercise_id = ?
+            ORDER BY
+                CASE status
+                    WHEN 'in_progress' THEN 0
+                    WHEN 'open' THEN 1
+                    ELSE 2
+                END,
+                due_date IS NULL,
+                due_date,
+                created_at
+            """,
+            (exercise_id,),
+        ).fetchall()
+    return [row_to_improvement_action(row) for row in rows]
+
+
+def get_improvement_action(action_id: str) -> Optional[ImprovementAction]:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM improvement_actions WHERE id = ?",
+            (action_id,),
+        ).fetchone()
+    return row_to_improvement_action(row) if row else None
+
+
+def update_improvement_action_status(action_id: str, status: str) -> bool:
+    completed_at = timestamp() if status == "completed" else None
+    with connect() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE improvement_actions
+            SET status = ?, completed_at = ?
+            WHERE id = ?
+            """,
+            (status, completed_at, action_id),
+        )
+        conn.commit()
+    return cursor.rowcount == 1

@@ -85,5 +85,40 @@ class ModelMigrationTests(TestCase):
                 self.assertEqual(1, len(assessments))
                 self.assertEqual("exemplary", assessments[0]["rating"])
                 self.assertIn("communicated", assessments[0]["notes"])
+
+                checkpoint = models.create_checkpoint(
+                    exercise.id,
+                    title="Decision review",
+                    description="Review current impact.",
+                    audience="Incident Commander",
+                    expected_action="State the next decision.",
+                    scheduled_offset_seconds=600,
+                    objective_index=0,
+                )
+                self.assertEqual(
+                    [checkpoint],
+                    models.list_checkpoints(exercise.id),
+                )
+                self.assertTrue(models.complete_checkpoint(checkpoint.id))
+                self.assertFalse(models.complete_checkpoint(checkpoint.id))
+
+                action = models.create_improvement_action(
+                    exercise.id,
+                    title="Update escalation procedure",
+                    owner="Incident Management",
+                    due_date="2026-02-01",
+                    notes="Add an explicit decision owner.",
+                )
+                self.assertEqual("open", action.status)
+                self.assertTrue(
+                    models.update_improvement_action_status(
+                        action.id,
+                        "completed",
+                    )
+                )
+                stored_action = models.get_improvement_action(action.id)
+                self.assertIsNotNone(stored_action)
+                self.assertEqual("completed", stored_action.status)
+                self.assertIsNotNone(stored_action.completed_at)
                 self.assertEqual(models.SCHEMA_VERSION, models.database_schema_version())
                 self.assertTrue(models.database_health()["healthy"])

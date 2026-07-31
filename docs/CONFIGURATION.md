@@ -13,6 +13,8 @@ LiveFireTTX reads configuration from environment variables at process startup.
 | `LIVEFIRE_REQUEST_TIMEOUT_SECONDS` | `3` | Positive integer |
 | `LIVEFIRE_SCHEDULER_ENABLED` | `true` | Boolean controlling automatic narrative delivery |
 | `LIVEFIRE_SCHEDULER_INTERVAL_SECONDS` | `2` | Positive polling interval in seconds |
+| `LIVEFIRE_LAB_CONTROLS_ENABLED` | `true` | Boolean enabling fixed Docker lifecycle controls |
+| `LIVEFIRE_LAB_COMMAND_TIMEOUT_SECONDS` | `180` | Positive lifecycle timeout in seconds |
 
 Generated package deployment also accepts:
 
@@ -44,6 +46,18 @@ the host environment. For example, start in manual-only mode with:
 ```bash
 LIVEFIRE_SCHEDULER_ENABLED=false docker compose up -d --build
 ```
+
+## One-Click Lab Controls
+
+Direct host installations can deploy, validate, repair, and destroy each
+generated lab from Run Mode. Commands are fixed Docker Compose operations
+against the generated exercise package; request data cannot choose a command,
+binary, Compose file, working directory, target, or output path.
+
+The application container sets `LIVEFIRE_LAB_CONTROLS_ENABLED=false`. Mounting
+the host Docker socket into the application container is not a supported
+deployment pattern. Use generated `deploy.sh`, `validate.sh`, and `destroy.sh`
+scripts when running the facilitator as a container.
 
 ## Operational Endpoints
 

@@ -72,12 +72,21 @@
 - Live command-center progress, remaining time, overtime, and due-state cues
 - Configurable local scheduler with atomic delivery evidence
 
-## Next: v1.2 Portable Exercise Design
+## v1.2 Exercise Operations
+
+- Unified MSEL timeline for injects, chaos controls, and evaluator checkpoints
+- Focused facilitator run mode with clear next-action guidance
+- Participant-safe presentation display and dedicated evaluator workspace
+- Corrective-action ownership, due dates, status, and AAR/IP export
+- Optional fixed-command one-click lab lifecycle for direct host installs
+
+## Next: v1.3 Portable Exercise Design
 
 - Scenario-pack import/export independent of generated exercise instances
-- More detailed role permissions and observer-only views
+- Versioned local scenario library and reusable organization profiles
+- Authenticated role permissions for networked or shared deployments
 
-## Next: v1.3 Evidence and Experience
+## Next: v1.4 Evidence and Experience
 
 - Signed evidence manifests and configurable retention
 - Browser-driven accessibility and end-to-end UI regression tests

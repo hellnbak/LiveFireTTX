@@ -8,12 +8,91 @@
       <p><code>{{ exercise.id }}</code> local exercise package</p>
     </div>
     <div class="actions">
+      <a class="button primary" href="/exercises/{{ exercise.id }}/run">Run Exercise</a>
+      <a class="button" href="/exercises/{{ exercise.id }}/present" target="_blank" rel="noreferrer">Participant Display</a>
+      <a class="button" href="/exercises/{{ exercise.id }}/evaluate">Evaluator Workspace</a>
       <a class="button" href="http://127.0.0.1:8088" target="_blank" rel="noreferrer">Open Target</a>
       <a class="button" href="http://127.0.0.1:8090/docs" target="_blank" rel="noreferrer">Chaos API</a>
       <a class="button" href="/exercises/{{ exercise.id }}/reports/after-action.md">After-Action Report</a>
       <a class="button primary" href="/exercises/{{ exercise.id }}/reports/evidence.zip">Evidence Package</a>
       <a class="button" href="/exercises/{{ exercise.id }}/download">Download Package</a>
     </div>
+  </div>
+</section>
+
+<section class="card wide operations-panel">
+  <div class="row between">
+    <div>
+      <p class="eyebrow">Master Scenario Events List</p>
+      <h3>Run of Show</h3>
+      <p class="muted">Narratives, artifacts, safe chaos controls, and evaluator checkpoints in one operational timeline.</p>
+    </div>
+    <div class="operations-summary">
+      <span><strong>{{ run_of_show.completed_count }}</strong> complete</span>
+      <span><strong>{{ run_of_show.due_count }}</strong> due</span>
+      <span><strong>{{ run_of_show.entry_count }}</strong> total</span>
+    </div>
+  </div>
+  {% if run_of_show.next_entry %}
+    {% set next = run_of_show.next_entry %}
+    <article class="next-operation {{ next.status }}">
+      <div>
+        <span class="pill {{ 'active' if next.status == 'due' else '' }}">Next · T+{{ next.offset_seconds // 60 }} min</span>
+        <h4>{{ next.title }}</h4>
+        <p>{{ next.description }}</p>
+        <small>{{ next.kind|title }} · {{ next.audience }}{% if next.expected_action %} · Expected: {{ next.expected_action }}{% endif %}</small>
+      </div>
+      <a class="button primary" href="/exercises/{{ exercise.id }}/run">Open Run Mode</a>
+    </article>
+  {% else %}
+    <div class="empty-operation">No scheduled operation remains. Add a checkpoint or complete the exercise.</div>
+  {% endif %}
+  <div class="msel-list compact-msel">
+    {% for entry in run_of_show.entries %}
+      <div class="msel-entry {{ entry.status }}">
+        <span class="msel-time">{% if entry.offset_seconds is not none %}T+{{ entry.offset_seconds // 60 }}{% else %}Manual{% endif %}</span>
+        <div><strong>{{ entry.title }}</strong><small>{{ entry.kind|title }} · {{ entry.audience }}</small></div>
+        <span class="pill {{ 'active' if entry.status == 'due' else '' }}">{{ entry.status }}</span>
+      </div>
+    {% endfor %}
+  </div>
+  <details class="operations-builder">
+    <summary>Add evaluator checkpoint</summary>
+    <form action="/exercises/{{ exercise.id }}/checkpoints" method="post">
+      <div class="operations-form-grid">
+        <div class="control-field"><label for="checkpoint-title">Title</label><input id="checkpoint-title" name="title" maxlength="120" required></div>
+        <div class="control-field"><label for="checkpoint-minute">Exercise minute</label><input id="checkpoint-minute" name="offset_minutes" type="number" min="0" max="{{ exercise.duration_minutes }}" required></div>
+        <div class="control-field"><label for="checkpoint-audience">Audience</label><input id="checkpoint-audience" name="audience" maxlength="120" value="All Participants" required></div>
+        <div class="control-field"><label for="checkpoint-objective">Objective link</label><select id="checkpoint-objective" name="objective_index"><option value="">None</option>{% for objective in exercise.objectives %}<option value="{{ loop.index0 }}">{{ loop.index }}. {{ objective }}</option>{% endfor %}</select></div>
+      </div>
+      <label for="checkpoint-description">Facilitator prompt</label>
+      <textarea id="checkpoint-description" name="description" rows="2" maxlength="1000" required></textarea>
+      <label for="checkpoint-expected">Expected participant action</label>
+      <textarea id="checkpoint-expected" name="expected_action" rows="2" maxlength="1000" required></textarea>
+      <button class="button" type="submit">Add to Run of Show</button>
+    </form>
+  </details>
+</section>
+
+<section class="card wide lab-panel">
+  <div class="row between">
+    <div>
+      <p class="eyebrow">Guided Lab Lifecycle</p>
+      <h3>One-Click Setup</h3>
+      <p class="muted">Uses only the generated, path-contained Compose definition and fixed Docker operations.</p>
+    </div>
+    <span class="pill {{ 'healthy' if lab.can_control else '' }}">{{ 'Ready for one-click control' if lab.can_control else 'Manual package mode' }}</span>
+  </div>
+  <div class="actions">
+    {% if lab.can_control %}
+      {% if exercise.status == 'created' %}<form class="inline-form" action="/exercises/{{ exercise.id }}/lab/launch" method="post"><button class="button primary" type="submit">Launch Lab &amp; Start</button></form>{% endif %}
+      <form class="inline-form" action="/exercises/{{ exercise.id }}/lab/deploy" method="post"><button class="button" type="submit">Deploy / Repair</button></form>
+      <form class="inline-form" action="/exercises/{{ exercise.id }}/lab/validate" method="post"><button class="button" type="submit">Validate Lab</button></form>
+      <form class="inline-form" action="/exercises/{{ exercise.id }}/lab/destroy" method="post"><button class="button warning" type="submit">Destroy Lab</button></form>
+    {% else %}
+      <span class="muted">Install Docker and run LiveFireTTX directly on the host, or use the generated package scripts.</span>
+      <a class="button" href="/exercises/{{ exercise.id }}/download">Download Package</a>
+    {% endif %}
   </div>
 </section>
 
@@ -571,7 +650,7 @@
 </section>
 {% endif %}
 
-<section class="card wide">
+<section id="inject-console" class="card wide">
   <h3>Facilitator Inject Console</h3>
   <p>Choose narrative injects or apply safe chaos actions at the intensity needed for the room.</p>
   {% for stage, injects in injects_by_stage.items() %}
@@ -580,7 +659,7 @@
       <div class="inject-grid">
       {% for inj in injects %}
         {% set schedule = inject_schedules.get(inj.id, {}) %}
-        <div class="inject {{ 'done' if inj.triggered else '' }} {{ 'due' if schedule.get('status') == 'due' else '' }}" data-inject-id="{{ inj.id }}">
+        <div id="inject-{{ inj.id }}" class="inject {{ 'done' if inj.triggered else '' }} {{ 'due' if schedule.get('status') == 'due' else '' }}" data-inject-id="{{ inj.id }}">
           <div class="row between"><strong>{{ inj.title }}</strong><span class="type-badge">{{ inj.action_type|replace('_', ' ') }}</span></div>
           <p>{{ inj.description }}</p>
           <small>Audience: {{ inj.audience }}</small>

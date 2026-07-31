@@ -26,7 +26,7 @@ LiveFireTTX must not generate, execute, or facilitate:
 - Arbitrary commands, executable injects, remote target addresses, or
   operator-selected filesystem paths
 
-## v1.1 Safety Guardrails
+## v1.2 Safety Guardrails
 
 - Allows only actions included in the generated scenario
 - Modifies generated synthetic state and package artifacts only
@@ -44,6 +44,10 @@ LiveFireTTX must not generate, execute, or facilitate:
 - Rejects paths that resolve outside generated package boundaries
 - Restricts automatic scheduling to narrative injects; chaos actions always
   require an explicit facilitator or playbook control request
+- Restricts one-click lab lifecycle to fixed Docker Compose operations against
+  a generated, path-contained, non-symlinked exercise definition
+- Keeps host Docker control disabled in the application container
+- Reveals only delivered narrative and artifact information in participant view
 
 Dependency faults alter local API behavior only. They do not contact payment
 processors, queues, storage providers, telemetry systems, or third-party APIs.

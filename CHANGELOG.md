@@ -2,6 +2,33 @@
 
 All notable changes to LiveFireTTX are documented here.
 
+## 1.2.0 - 2026-07-31
+
+### Added
+
+- Unified Master Scenario Events List combining scheduled injects, artifacts,
+  safe chaos controls, and objective-linked evaluator checkpoints
+- Focused facilitator run mode with next-action guidance and complete timeline
+- Participant-safe presentation display that reveals only delivered information
+- Dedicated evaluator workspace with observations, objective assessments, and
+  corrective-action ownership, due dates, and status tracking
+- Optional one-click host lab launch, validation, repair, and teardown controls
+- MSEL checkpoints and improvement-plan data in after-action and evidence exports
+
+### Changed
+
+- New exercises include three default decision and recovery checkpoints
+- SQLite schema version 4 persists checkpoints and improvement actions
+- Evidence manifest schema version 3 includes MSEL and corrective-action CSVs
+- Application container keeps host Docker control disabled by default
+
+### Security
+
+- Lab lifecycle operations use only fixed Docker Compose commands against the
+  path-contained generated package; arbitrary commands and paths are rejected
+- Participant status responses omit future injects, chaos controls, evaluator
+  data, package paths, and facilitator notes
+
 ## 1.1.0 - 2026-07-31
 
 ### Added

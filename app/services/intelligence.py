@@ -3,9 +3,10 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from io import BytesIO, StringIO
-from typing import Any, Iterable
+from typing import Any, Iterable, cast
 from zipfile import ZIP_DEFLATED, ZipFile
 import csv
 import json
@@ -34,6 +35,8 @@ def build_exercise_intelligence(
     events: Iterable[Any],
     chaos_state: dict[str, Any] | None,
     assessments: Iterable[Any],
+    improvement_actions: Iterable[Any] = (),
+    checkpoints: Iterable[Any] = (),
 ) -> dict[str, Any]:
     state = chaos_state or {}
     event_rows = [_row_dict(event) for event in events]
@@ -113,6 +116,8 @@ def build_exercise_intelligence(
         summarize_run(run)
         for run in reversed(chaos_runs[-12:])
     ]
+    improvement_rows = [_row_dict(action) for action in improvement_actions]
+    checkpoint_rows = [_row_dict(checkpoint) for checkpoint in checkpoints]
 
     return {
         "readiness_score": readiness_score,
@@ -138,6 +143,18 @@ def build_exercise_intelligence(
             1 for run in playbook_runs if run.get("status") == "completed"
         ),
         "run_comparison": run_comparison,
+        "improvement_actions": improvement_rows,
+        "open_improvement_actions": sum(
+            action.get("status") != "completed" for action in improvement_rows
+        ),
+        "completed_improvement_actions": sum(
+            action.get("status") == "completed" for action in improvement_rows
+        ),
+        "checkpoints": checkpoint_rows,
+        "completed_checkpoints": sum(
+            checkpoint.get("status") == "completed"
+            for checkpoint in checkpoint_rows
+        ),
     }
 
 
@@ -290,7 +307,42 @@ def render_evidence_markdown(
             ]
         )
 
-    lines.append("## Chaos Run Comparison")
+    lines.extend(["## Master Scenario Events List Checkpoints", ""])
+    if intelligence["checkpoints"]:
+        for checkpoint in intelligence["checkpoints"]:
+            objective_index = checkpoint.get("objective_index")
+            objective_label = (
+                f"objective {int(objective_index) + 1}"
+                if objective_index is not None
+                else "no objective link"
+            )
+            lines.append(
+                f"- T+{int(checkpoint['scheduled_offset_seconds']) // 60} min — "
+                f"**{checkpoint['title']}** ({checkpoint['status']}; "
+                f"{objective_label}): {checkpoint['expected_action']}"
+            )
+    else:
+        lines.append("_No MSEL checkpoints configured._")
+
+    lines.extend(["", "## Improvement Plan", ""])
+    if intelligence["improvement_actions"]:
+        lines.extend(
+            [
+                "| Corrective action | Owner | Due | Status | Notes |",
+                "|---|---|---|---|---|",
+            ]
+        )
+        for action in intelligence["improvement_actions"]:
+            notes = str(action.get("notes", "")).replace("|", "\\|")
+            lines.append(
+                f"| {action['title']} | {action['owner']} | "
+                f"{action.get('due_date') or 'Not set'} | "
+                f"{action['status'].replace('_', ' ')} | {notes or '—'} |"
+            )
+    else:
+        lines.append("_No corrective actions recorded._")
+
+    lines.extend(["", "## Chaos Run Comparison"])
     if intelligence["run_comparison"]:
         lines.extend(
             [
@@ -373,7 +425,7 @@ def build_evidence_archive(
             "manifest.json",
             json.dumps(
                 {
-                    "schema_version": 2,
+                    "schema_version": 3,
                     "exercise_id": exercise.id,
                     "exercise_clock": {
                         "status": clock["status"],
@@ -388,6 +440,8 @@ def build_evidence_archive(
                         "events.csv",
                         "chaos_runs.csv",
                         "objective_assessments.csv",
+                        "msel_checkpoints.csv",
+                        "improvement_actions.csv",
                         "chaos_state.json",
                     ],
                 },
@@ -436,6 +490,40 @@ def build_evidence_archive(
             ),
         )
         archive.writestr(
+            "msel_checkpoints.csv",
+            _csv_text(
+                intelligence["checkpoints"],
+                [
+                    "id",
+                    "title",
+                    "description",
+                    "audience",
+                    "expected_action",
+                    "scheduled_offset_seconds",
+                    "objective_index",
+                    "status",
+                    "created_at",
+                    "completed_at",
+                ],
+            ),
+        )
+        archive.writestr(
+            "improvement_actions.csv",
+            _csv_text(
+                intelligence["improvement_actions"],
+                [
+                    "id",
+                    "title",
+                    "owner",
+                    "due_date",
+                    "status",
+                    "notes",
+                    "created_at",
+                    "completed_at",
+                ],
+            ),
+        )
+        archive.writestr(
             "chaos_state.json",
             json.dumps(state, indent=2, sort_keys=True),
         )
@@ -469,6 +557,8 @@ def _safe_csv_value(value: Any) -> Any:
 def _row_dict(row: Any) -> dict[str, Any]:
     if isinstance(row, dict):
         return dict(row)
+    if is_dataclass(row):
+        return asdict(cast(Any, row))
     try:
         return dict(row)
     except (TypeError, ValueError):

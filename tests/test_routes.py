@@ -60,7 +60,7 @@ class ApplicationRouteTests(TestCase):
                 with TestClient(app) as client:
                     health = client.get("/healthz")
                     self.assertEqual(200, health.status_code)
-                    self.assertEqual("1.1.0", health.json()["version"])
+                    self.assertEqual("1.2.0", health.json()["version"])
                     self.assertTrue(health.json()["healthy"])
                     self.assertTrue(health.headers["x-request-id"])
                     self.assertEqual(
@@ -237,3 +237,125 @@ class ApplicationRouteTests(TestCase):
                             expected_status,
                             models.get_exercise(exercise.id).status,
                         )
+
+    def test_v12_operations_views_workflow_and_one_click_launch(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with (
+                patch.object(models, "DB_PATH", root / "livefirettx.db"),
+                patch.object(models, "GENERATED_ROOT", root / "exercises"),
+                patch(
+                    "app.services.generator.GENERATED_ROOT",
+                    root / "exercises",
+                ),
+            ):
+                with TestClient(app) as client:
+                    created = client.post(
+                        "/exercises",
+                        data={
+                            "name": "Guided operations",
+                            "scenario_type": "cloud_outage",
+                            "platform": "local_docker",
+                            "business_system": "Commerce",
+                            "difficulty": "intermediate",
+                            "duration_minutes": "60",
+                            "participants": "Incident Commander, SRE",
+                            "objectives": "Assess impact\nCommunicate status",
+                        },
+                        follow_redirects=False,
+                    )
+                    exercise = models.list_exercises()[0]
+                    self.assertEqual(3, len(models.list_checkpoints(exercise.id)))
+
+                    detail = client.get(created.headers["location"])
+                    self.assertIn("Master Scenario Events List", detail.text)
+                    self.assertIn("One-Click Setup", detail.text)
+                    run_mode = client.get(f"/exercises/{exercise.id}/run")
+                    self.assertEqual(200, run_mode.status_code)
+                    self.assertIn("Facilitator Run Mode", run_mode.text)
+                    self.assertIn("Next Action", run_mode.text)
+                    presentation = client.get(
+                        f"/exercises/{exercise.id}/present"
+                    )
+                    self.assertEqual(200, presentation.status_code)
+                    self.assertNotIn("Executive Status Request", presentation.text)
+                    evaluation = client.get(
+                        f"/exercises/{exercise.id}/evaluate"
+                    )
+                    self.assertEqual(200, evaluation.status_code)
+                    self.assertIn("Evaluator Workspace", evaluation.text)
+
+                    added_checkpoint = client.post(
+                        f"/exercises/{exercise.id}/checkpoints",
+                        data={
+                            "title": "Business decision",
+                            "description": "Review customer impact.",
+                            "audience": "Incident Commander",
+                            "expected_action": "Choose a recovery path.",
+                            "offset_minutes": "30",
+                            "objective_index": "0",
+                        },
+                        follow_redirects=False,
+                    )
+                    self.assertEqual(303, added_checkpoint.status_code)
+                    checkpoint = next(
+                        item
+                        for item in models.list_checkpoints(exercise.id)
+                        if item.title == "Business decision"
+                    )
+                    completed = client.post(
+                        f"/checkpoints/{checkpoint.id}/complete",
+                        follow_redirects=False,
+                    )
+                    self.assertEqual(303, completed.status_code)
+
+                    improvement = client.post(
+                        f"/exercises/{exercise.id}/improvements",
+                        data={
+                            "title": "Update escalation path",
+                            "owner": "Incident Management",
+                            "due_date": "2026-08-30",
+                            "notes": "Name the decision owner.",
+                        },
+                        follow_redirects=False,
+                    )
+                    self.assertEqual(303, improvement.status_code)
+                    action = models.list_improvement_actions(exercise.id)[0]
+                    updated = client.post(
+                        f"/improvements/{action.id}/status/completed",
+                        follow_redirects=False,
+                    )
+                    self.assertEqual(303, updated.status_code)
+                    self.assertEqual(
+                        "completed",
+                        models.get_improvement_action(action.id).status,
+                    )
+
+                    with patch(
+                        "app.main.run_lab_operation",
+                        return_value={
+                            "operation": "deploy",
+                            "success": True,
+                            "output": "Lab ready",
+                        },
+                    ):
+                        launched = client.post(
+                            f"/exercises/{exercise.id}/lab/launch",
+                            follow_redirects=False,
+                        )
+                    self.assertEqual(303, launched.status_code)
+                    self.assertEqual(
+                        "running",
+                        models.get_exercise(exercise.id).status,
+                    )
+                    opening = next(
+                        inject
+                        for inject in models.get_injects(exercise.id)
+                        if inject.title == "Initial Situation Brief"
+                    )
+                    self.assertTrue(opening.triggered)
+
+                    evidence = client.get(
+                        f"/exercises/{exercise.id}/reports/evidence.zip"
+                    )
+                    self.assertEqual(200, evidence.status_code)

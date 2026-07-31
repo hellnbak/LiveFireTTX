@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from contextlib import suppress
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlparse, urlsplit
@@ -31,17 +31,25 @@ from app.models import (
     InjectOption,
     SCENARIO_LIBRARY,
     add_event,
+    complete_checkpoint,
+    create_checkpoint,
+    create_improvement_action,
+    get_checkpoint,
     get_exercise,
+    get_improvement_action,
     get_inject,
     get_injects,
     init_db,
+    list_checkpoints,
     list_events,
     list_exercises,
+    list_improvement_actions,
     list_objective_assessments,
     mark_inject_triggered,
     save_objective_assessment,
     save_exercise,
     save_injects,
+    update_improvement_action_status,
 )
 from app.routes.packages import router as packages_router
 from app.routes.system import router as system_router
@@ -67,6 +75,12 @@ from app.services.intelligence import (
     build_evidence_archive,
     build_exercise_intelligence,
     render_evidence_markdown,
+)
+from app.services.labs import LabOperationError, lab_snapshot, run_lab_operation
+from app.services.operations import (
+    build_run_of_show,
+    participant_snapshot,
+    seed_default_checkpoints,
 )
 from app.services.runtime import (
     ChaosExecutionError,
@@ -231,6 +245,13 @@ def _same_local_origin(request: Request, origin: str) -> bool:
     )
 
 
+def _redirect_to_run_mode(exercise: Exercise) -> RedirectResponse:
+    return RedirectResponse(
+        url=f"/exercises/{quote(exercise.id, safe='')}/run",
+        status_code=303,
+    )
+
+
 @app.middleware("http")
 async def request_context(request: Request, call_next):
     request_id = uuid.uuid4().hex
@@ -311,6 +332,8 @@ def _exercise_evidence(exercise):
         events,
         chaos_state,
         list_objective_assessments(exercise.id),
+        list_improvement_actions(exercise.id),
+        list_checkpoints(exercise.id),
     )
     return injects, events, chaos_state, intelligence
 
@@ -409,6 +432,7 @@ async def create_exercise(request: Request):
     ex, injects = create_exercise_from_request(req)
     save_exercise(ex)
     save_injects(injects)
+    seed_default_checkpoints(ex)
     add_event(
         ex.id,
         "exercise_created",
@@ -426,6 +450,11 @@ def exercise_detail(request: Request, exercise_id: str):
     injects, events, chaos_state, intelligence = _exercise_evidence(ex)
     clock = clock_snapshot(ex)
     inject_schedules = inject_schedule_snapshot(ex, injects)
+    run_of_show = build_run_of_show(
+        ex,
+        injects,
+        list_checkpoints(ex.id),
+    )
     by_stage: dict[str, list[InjectOption]] = {}
     for i in injects:
         by_stage.setdefault(i.stage, []).append(i)
@@ -482,12 +511,260 @@ def exercise_detail(request: Request, exercise_id: str):
                 item["id"]: item for item in inject_schedules
             },
             "scheduler_enabled": settings.scheduler_enabled,
+            "run_of_show": run_of_show,
+            "lab": lab_snapshot(ex),
+            "improvement_actions": list_improvement_actions(ex.id),
         },
     )
 
 
+@app.get("/exercises/{exercise_id}/run", response_class=HTMLResponse)
+def exercise_run_mode(request: Request, exercise_id: str):
+    exercise = get_exercise(exercise_id)
+    if not exercise:
+        raise HTTPException(404, "Exercise not found")
+    injects = get_injects(exercise.id)
+    run_of_show = build_run_of_show(
+        exercise,
+        injects,
+        list_checkpoints(exercise.id),
+    )
+    control_status = read_control_status(exercise)
+    return templates.TemplateResponse(
+        request,
+        "run.html",
+        {
+            "exercise": exercise,
+            "clock": run_of_show["clock"],
+            "run_of_show": run_of_show,
+            "control_status": control_status,
+            "lab": lab_snapshot(exercise),
+            "scheduler_enabled": settings.scheduler_enabled,
+        },
+    )
+
+
+@app.get("/exercises/{exercise_id}/present", response_class=HTMLResponse)
+def exercise_presentation(request: Request, exercise_id: str):
+    exercise = get_exercise(exercise_id)
+    if not exercise:
+        raise HTTPException(404, "Exercise not found")
+    snapshot = participant_snapshot(exercise, get_injects(exercise.id))
+    return templates.TemplateResponse(
+        request,
+        "present.html",
+        {
+            "exercise": exercise,
+            "snapshot": snapshot,
+        },
+    )
+
+
+@app.get("/exercises/{exercise_id}/present/status")
+def exercise_presentation_status(exercise_id: str):
+    exercise = get_exercise(exercise_id)
+    if not exercise:
+        raise HTTPException(404, "Exercise not found")
+    return JSONResponse(
+        participant_snapshot(exercise, get_injects(exercise.id))
+    )
+
+
+@app.get("/exercises/{exercise_id}/evaluate", response_class=HTMLResponse)
+def exercise_evaluation(request: Request, exercise_id: str):
+    exercise = get_exercise(exercise_id)
+    if not exercise:
+        raise HTTPException(404, "Exercise not found")
+    injects, events, _, intelligence = _exercise_evidence(exercise)
+    return templates.TemplateResponse(
+        request,
+        "evaluate.html",
+        {
+            "exercise": exercise,
+            "intelligence": intelligence,
+            "rating_labels": RATING_LABELS,
+            "events": events,
+            "run_of_show": build_run_of_show(
+                exercise,
+                injects,
+                list_checkpoints(exercise.id),
+            ),
+            "improvement_actions": list_improvement_actions(exercise.id),
+        },
+    )
+
+
+@app.post("/exercises/{exercise_id}/lab/{command}")
+def control_exercise_lab(exercise_id: str, command: str):
+    exercise = get_exercise(exercise_id)
+    if not exercise:
+        raise HTTPException(404, "Exercise not found")
+    operation = "deploy" if command == "launch" else command
+    if operation not in {"deploy", "validate", "destroy"}:
+        raise HTTPException(404, "Lab operation not found")
+    try:
+        result = run_lab_operation(exercise, operation)
+    except LabOperationError as exc:
+        add_event(
+            exercise.id,
+            "lab_operation_failed",
+            f"Lab {command.title()} Failed",
+            str(exc),
+        )
+        raise HTTPException(503, str(exc)) from exc
+    add_event(
+        exercise.id,
+        "lab_operation",
+        f"Lab {command.title()} Completed",
+        result["output"],
+    )
+    if command == "launch" and exercise.status == "created":
+        exercise = transition_clock(exercise.id, "start")
+        add_event(
+            exercise.id,
+            "exercise_start",
+            "Exercise Started",
+            "One-click launch deployed the lab and started the facilitator clock",
+        )
+        if settings.scheduler_enabled:
+            dispatch_due_injects(exercise.id)
+    return _redirect_to_run_mode(exercise)
+
+
+@app.post("/exercises/{exercise_id}/checkpoints")
+async def add_exercise_checkpoint(request: Request, exercise_id: str):
+    exercise = get_exercise(exercise_id)
+    if not exercise:
+        raise HTTPException(404, "Exercise not found")
+    if exercise.status == "completed":
+        raise HTTPException(409, "Completed exercises cannot add checkpoints")
+    fields = await _form_fields(request)
+    title = _field(fields, "title").strip()
+    description = _field(fields, "description").strip()
+    audience = _field(fields, "audience").strip()
+    expected_action = _field(fields, "expected_action").strip()
+    offset_minutes = _integer_field(fields, "offset_minutes", 0)
+    raw_objective_index = _field(fields, "objective_index", "")
+    if not title or len(title) > 120:
+        raise HTTPException(400, "Checkpoint title must be 1 to 120 characters")
+    if not description or len(description) > 1000:
+        raise HTTPException(400, "Checkpoint description must be 1 to 1000 characters")
+    if not audience or len(audience) > 120:
+        raise HTTPException(400, "Checkpoint audience must be 1 to 120 characters")
+    if not expected_action or len(expected_action) > 1000:
+        raise HTTPException(400, "Expected action must be 1 to 1000 characters")
+    if not 0 <= offset_minutes <= exercise.duration_minutes:
+        raise HTTPException(400, "Checkpoint time is outside the exercise duration")
+    objective_index = None
+    if raw_objective_index:
+        try:
+            objective_index = int(raw_objective_index)
+        except ValueError as exc:
+            raise HTTPException(400, "Objective selection is invalid") from exc
+        if not 0 <= objective_index < len(exercise.objectives):
+            raise HTTPException(400, "Objective selection is invalid")
+    checkpoint = create_checkpoint(
+        exercise.id,
+        title=title,
+        description=description,
+        audience=audience,
+        expected_action=expected_action,
+        scheduled_offset_seconds=offset_minutes * 60,
+        objective_index=objective_index,
+    )
+    add_event(
+        exercise.id,
+        "checkpoint_created",
+        f"MSEL Checkpoint Added: {checkpoint.title}",
+        f"Scheduled for T+{offset_minutes} minutes\nAudience: {audience}",
+    )
+    return _redirect_to_exercise(exercise)
+
+
+@app.post("/checkpoints/{checkpoint_id}/complete")
+def complete_exercise_checkpoint(checkpoint_id: str):
+    checkpoint = get_checkpoint(checkpoint_id)
+    if not checkpoint:
+        raise HTTPException(404, "Checkpoint not found")
+    exercise = get_exercise(checkpoint.exercise_id)
+    if not exercise:
+        raise HTTPException(404, "Exercise not found")
+    if not complete_checkpoint(checkpoint.id):
+        raise HTTPException(409, "Checkpoint has already been completed")
+    add_event(
+        exercise.id,
+        "checkpoint_completed",
+        f"MSEL Checkpoint Completed: {checkpoint.title}",
+        f"Expected action: {checkpoint.expected_action}",
+    )
+    return _redirect_to_run_mode(exercise)
+
+
+@app.post("/exercises/{exercise_id}/improvements")
+async def add_improvement_action(request: Request, exercise_id: str):
+    exercise = get_exercise(exercise_id)
+    if not exercise:
+        raise HTTPException(404, "Exercise not found")
+    fields = await _form_fields(request)
+    title = _field(fields, "title").strip()
+    owner = _field(fields, "owner").strip()
+    due_date = _field(fields, "due_date", "").strip() or None
+    notes = _field(fields, "notes", "").strip()
+    if not title or len(title) > 160:
+        raise HTTPException(400, "Action title must be 1 to 160 characters")
+    if not owner or len(owner) > 120:
+        raise HTTPException(400, "Action owner must be 1 to 120 characters")
+    if len(notes) > 3000:
+        raise HTTPException(400, "Action notes must be 3000 characters or fewer")
+    if due_date:
+        try:
+            date.fromisoformat(due_date)
+        except ValueError as exc:
+            raise HTTPException(400, "Due date must use YYYY-MM-DD") from exc
+    action = create_improvement_action(
+        exercise.id,
+        title=title,
+        owner=owner,
+        due_date=due_date,
+        notes=notes,
+    )
+    add_event(
+        exercise.id,
+        "improvement_action_created",
+        f"Improvement Action Added: {action.title}",
+        f"Owner: {action.owner}\nDue: {action.due_date or 'Not set'}",
+    )
+    return RedirectResponse(
+        url=f"/exercises/{quote(exercise.id, safe='')}/evaluate",
+        status_code=303,
+    )
+
+
+@app.post("/improvements/{action_id}/status/{status}")
+def set_improvement_action_status(action_id: str, status: str):
+    if status not in {"open", "in_progress", "completed"}:
+        raise HTTPException(404, "Improvement status not found")
+    action = get_improvement_action(action_id)
+    if not action:
+        raise HTTPException(404, "Improvement action not found")
+    exercise = get_exercise(action.exercise_id)
+    if not exercise:
+        raise HTTPException(404, "Exercise not found")
+    update_improvement_action_status(action.id, status)
+    add_event(
+        exercise.id,
+        "improvement_action_status",
+        f"Improvement Action Updated: {action.title}",
+        f"Status: {status.replace('_', ' ')}",
+    )
+    return RedirectResponse(
+        url=f"/exercises/{quote(exercise.id, safe='')}/evaluate",
+        status_code=303,
+    )
+
+
 @app.post("/exercises/{exercise_id}/clock/{command}")
-def control_exercise_clock(exercise_id: str, command: str):
+def control_exercise_clock(request: Request, exercise_id: str, command: str):
     exercise = get_exercise(exercise_id)
     if not exercise:
         raise HTTPException(404, "Exercise not found")
@@ -510,6 +787,8 @@ def control_exercise_clock(exercise_id: str, command: str):
     )
     if settings.scheduler_enabled and command in {"start", "resume"}:
         dispatch_due_injects(updated.id)
+    if request.query_params.get("view") == "run":
+        return _redirect_to_run_mode(updated)
     return _redirect_to_exercise(updated)
 
 
@@ -573,6 +852,8 @@ async def trigger_inject(
             f"\nGuardrails: {guardrail_profile}"
         )
     add_event(ex.id, "inject_triggered", inj.title, f"{detail}\n{result}")
+    if request.query_params.get("view") == "run":
+        return _redirect_to_run_mode(ex)
     return _redirect_to_exercise(ex)
 
 
@@ -648,11 +929,13 @@ async def reset_exercise_chaos(request: Request, exercise_id: str):
 
     label = action or "all actions"
     add_event(ex.id, "chaos_reset", "Chaos State Reset", f"Reset: {label}\n{result}")
+    if request.query_params.get("view") == "run":
+        return _redirect_to_run_mode(ex)
     return _redirect_to_exercise(ex)
 
 
 @app.post("/exercises/{exercise_id}/chaos/emergency-stop")
-def emergency_stop_exercise_chaos(exercise_id: str):
+def emergency_stop_exercise_chaos(request: Request, exercise_id: str):
     ex = get_exercise(exercise_id)
     if not ex:
         raise HTTPException(404, "Exercise not found")
@@ -673,6 +956,8 @@ def emergency_stop_exercise_chaos(exercise_id: str):
         "Emergency Stop",
         result,
     )
+    if request.query_params.get("view") == "run":
+        return _redirect_to_run_mode(ex)
     return _redirect_to_exercise(ex)
 
 
@@ -695,6 +980,11 @@ def exercise_chaos_status(exercise_id: str):
             "dependencies": dependencies,
             "clock": clock_snapshot(ex),
             "inject_schedules": inject_schedule_snapshot(ex, injects),
+            "run_of_show": build_run_of_show(
+                ex,
+                injects,
+                list_checkpoints(ex.id),
+            ),
         }
     )
 
@@ -730,6 +1020,11 @@ async def assess_exercise_objective(
         f"Objective Assessed: {ex.objectives[objective_index]}",
         f"Rating: {RATING_LABELS[rating]}\nNotes: {notes or 'None'}",
     )
+    if request.query_params.get("view") == "evaluate":
+        return RedirectResponse(
+            url=f"/exercises/{quote(ex.id, safe='')}/evaluate",
+            status_code=303,
+        )
     return _redirect_to_exercise(ex)
 
 
@@ -1140,6 +1435,11 @@ async def add_manual_event(request: Request, exercise_id: str):
     if not detail or len(detail) > 5000:
         raise HTTPException(400, "Event detail must be between 1 and 5000 characters")
     add_event(exercise_id, "manual_note", title, detail)
+    if request.query_params.get("view") == "evaluate":
+        return RedirectResponse(
+            url=f"/exercises/{quote(ex.id, safe='')}/evaluate",
+            status_code=303,
+        )
     return _redirect_to_exercise(ex)
 
 

@@ -1,6 +1,6 @@
 # LiveFireTTX Architecture
 
-LiveFireTTX v1.1 is intentionally local-first. The facilitator application uses
+LiveFireTTX v1.2 is intentionally local-first. The facilitator application uses
 FastAPI, Jinja2, SQLite, and filesystem-backed generated packages. Every
 exercise receives a separate Docker Compose target and chaos controller bound
 to localhost.
@@ -12,11 +12,11 @@ Guided scenario preset
   -> validated exercise definition
   -> role briefs + sample data + dependency map
   -> generated target and scenario-scoped controller
-  -> facilitator injects and bounded playbooks
+  -> unified MSEL, facilitator injects, and bounded playbooks
   -> shared synthetic state
   -> observable dependency behavior
-  -> objective assessment and run intelligence
-  -> evidence archive and after-action report
+  -> objective assessment, corrective actions, and run intelligence
+  -> evidence archive and after-action report / improvement plan
 ```
 
 ## Application Components
@@ -58,10 +58,11 @@ roles, target modules, safe chaos modules, and default objectives.
 `app/routes/system.py` contains operational health, readiness, and backup
 endpoints. `app/routes/packages.py` serves path-contained participant material.
 
-The Jinja2 interface includes guided scenario setup, dependency topology,
-exercise intelligence, artifact design, live telemetry, run control, and the
-visual playbook editor. Browser checks improve feedback, while the generated
-controller remains authoritative for playbook validation.
+The Jinja2 interface includes guided scenario setup, a focused facilitator run
+mode, a participant-safe presentation display, an evaluator workspace,
+dependency topology, exercise intelligence, artifact design, live telemetry,
+run control, and the visual playbook editor. Browser checks improve feedback,
+while the generated controller remains authoritative for playbook validation.
 
 ### Exercise Intelligence
 
@@ -73,7 +74,7 @@ whether objectives were achieved.
 
 ### Facilitator Operations
 
-SQLite schema version 3 persists the exercise lifecycle clock, accumulated
+SQLite schema version 4 persists the exercise lifecycle clock, accumulated
 pause time, completion time, narrative schedules, and automatic-delivery mode.
 `app/services/facilitator.py` owns clock transitions, elapsed-time calculation,
 schedule state, and atomic due-inject delivery. A configurable local scheduler
@@ -83,6 +84,25 @@ The command center reconciles its one-second browser clock against server
 snapshots returned with live controller status. Every clock transition,
 schedule edit, and automatic delivery is also written to the exercise event
 log for after-action evidence.
+
+### Exercise Operations
+
+`app/services/operations.py` builds a unified MSEL from injects and persisted
+evaluator checkpoints, selects the next scheduled action, and creates a
+participant-safe status projection containing only delivered narrative and
+artifact information. Checkpoints can link to exercise objectives and record
+expected participant actions.
+
+`app/services/labs.py` provides optional one-click deployment, validation, and
+teardown for direct host installs. It derives the Compose file from the
+validated exercise ID, rejects symlinks, invokes no shell, accepts no arbitrary
+command or path input, and uses a narrow environment allowlist. Application
+container deployments disable this feature instead of mounting the Docker
+socket.
+
+Improvement actions retain an owner, optional due date, state, and success
+criteria. Exercise intelligence exports both MSEL checkpoints and corrective
+actions as part of the AAR/IP evidence package.
 
 ## Generated Dependency Target
 

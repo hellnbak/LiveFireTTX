@@ -5,7 +5,7 @@ tabletop exercises. It generates a scenario-specific target, a guarded chaos
 control plane, facilitator injects, participant materials, sample data, and an
 evidence-ready command center.
 
-> **Status:** v1.1.0. Run only in controlled lab environments.
+> **Status:** v1.2.0. Run only in controlled lab environments.
 
 ## Highlights
 
@@ -22,6 +22,9 @@ evidence-ready command center.
 - Live dependency map, condition telemetry, and run lifecycle evidence
 - Role-specific participant briefs, facilitator checklist, and sample data
 - Persistent facilitator clock with pause/resume and scheduled narrative injects
+- Unified MSEL run-of-show with next-action facilitator guidance
+- Participant presentation and evaluator/AAR improvement-planning workspaces
+- Optional one-click host lab launch, validation, and teardown
 - Safe watermarked artifact injects
 - Objective scoring, run comparison, after-action reports, and ZIP evidence export
 - Versioned SQLite migrations plus local backup and restore tooling
@@ -65,6 +68,11 @@ in the managed `livefirettx-data` Docker volume. Set
 can also be supplied to Docker Compose with the same environment variables
 listed below.
 
+One-click lab controls are intentionally disabled inside the application
+container because LiveFireTTX does not mount the host Docker socket. Run the
+Python application directly on the Docker host to use one-click lifecycle
+controls, or continue using the generated package scripts.
+
 Download a generated exercise package from the interface, unpack it on the
 host, and run its `target/deploy.sh`. The Compose configuration lets the
 facilitator container reach that host controller through the explicit
@@ -75,8 +83,10 @@ localhost.
 
 1. Select a scenario pack and review its dependency map.
 2. Tailor the business system, duration, roles, and objectives.
-3. Generate the exercise, review role briefs, and adjust narrative schedules.
-4. Deploy the generated target:
+3. Generate the exercise, review role briefs, and adjust the unified run of show.
+4. When running LiveFireTTX directly on the Docker host, select **Run Exercise**
+   and then **Launch Lab & Start**. In container or manual mode, deploy the
+   generated target:
 
    ```bash
    cd generated/exercises/<exercise-id>/target
@@ -84,7 +94,8 @@ localhost.
    ./validate.sh
    ```
 
-5. Start the facilitator clock, then use the command center or generated CLI:
+5. Use focused Run Mode for next-action guidance, or the command center and
+   generated CLI for detailed controls:
 
    ```bash
    cd generated/exercises/<exercise-id>/chaos
@@ -97,8 +108,8 @@ localhost.
 
 6. Pause or resume the exercise as needed; scheduled narratives freeze with the
    clock and resume from the same exercise time.
-7. Stop active runs, complete the exercise, assess objectives, and download the
-   evidence package.
+7. Stop active runs, complete the exercise, assess objectives, assign corrective
+   actions in the Evaluator Workspace, and download the AAR/IP evidence package.
 8. Clean up:
 
    ```bash
@@ -127,6 +138,8 @@ deployment when the default host ports are already in use.
 | `LIVEFIRE_REQUEST_TIMEOUT_SECONDS` | `3` | Controller request timeout |
 | `LIVEFIRE_SCHEDULER_ENABLED` | `true` | Enable automatic narrative delivery |
 | `LIVEFIRE_SCHEDULER_INTERVAL_SECONDS` | `2` | Scheduled-delivery polling interval |
+| `LIVEFIRE_LAB_CONTROLS_ENABLED` | `true` | Enable fixed one-click Docker controls on a direct host install |
+| `LIVEFIRE_LAB_COMMAND_TIMEOUT_SECONDS` | `180` | Maximum lifecycle operation time |
 
 The control URL must remain on loopback unless the container-only
 `host.docker.internal` bridge is explicitly enabled. See
