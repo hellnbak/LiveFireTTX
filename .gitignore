@@ -3,5 +3,14 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.coverage
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+.release-smoke/
+.livefirettx/
+backups/
 livefirettx.db
 generated/

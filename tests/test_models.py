@@ -85,3 +85,5 @@ class ModelMigrationTests(TestCase):
                 self.assertEqual(1, len(assessments))
                 self.assertEqual("exemplary", assessments[0]["rating"])
                 self.assertIn("communicated", assessments[0]["notes"])
+                self.assertEqual(models.SCHEMA_VERSION, models.database_schema_version())
+                self.assertTrue(models.database_health()["healthy"])

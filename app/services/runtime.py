@@ -15,10 +15,12 @@ import subprocess
 
 import yaml
 
+from app.config import settings
 from app.models import Exercise, InjectOption
 
 
-CONTROL_URL = "http://127.0.0.1:8090"
+CONTROL_URL = settings.control_url
+REQUEST_TIMEOUT_SECONDS = settings.request_timeout_seconds
 PLAYBOOK_ID_PATTERN = r"[a-z0-9][a-z0-9_-]{0,63}"
 PLAYBOOK_VERSION_PATTERN = r"\d{8}T\d{12}Z"
 
@@ -50,7 +52,10 @@ def read_control_status(exercise: Exercise) -> dict[str, Any]:
             "exercise_id": exercise.id,
         }
     try:
-        status = _request_json(f"{CONTROL_URL}/health", timeout=0.75)
+        status = _request_json(
+            f"{CONTROL_URL}/health",
+            timeout=min(REQUEST_TIMEOUT_SECONDS, 1),
+        )
     except ChaosExecutionError as exc:
         return {
             "mode": "guarded",
@@ -68,6 +73,27 @@ def read_control_status(exercise: Exercise) -> dict[str, Any]:
         "reachable": True,
         "ready": bool(status.get("ready") and matches_exercise),
         "matches_exercise": matches_exercise,
+    }
+
+
+def read_dependency_status(exercise: Exercise) -> dict[str, Any]:
+    if not _control_metadata(exercise):
+        return {"reachable": False, "dependencies": []}
+    try:
+        result = _request_json(
+            f"{CONTROL_URL}/dependencies",
+            timeout=min(REQUEST_TIMEOUT_SECONDS, 1),
+        )
+    except ChaosExecutionError as exc:
+        return {
+            "reachable": False,
+            "dependencies": [],
+            "error": str(exc),
+        }
+    return {
+        **result,
+        "reachable": True,
+        "matches_exercise": result.get("exercise_id") == exercise.id,
     }
 
 
@@ -506,7 +532,7 @@ def _parse_timestamp(value: str) -> datetime:
 def _request_json(
     url: str,
     payload: dict[str, Any] | None = None,
-    timeout: float = 4,
+    timeout: float = REQUEST_TIMEOUT_SECONDS,
     method: str | None = None,
 ) -> dict[str, Any]:
     data = json.dumps(payload).encode() if payload is not None else None

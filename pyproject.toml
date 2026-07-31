@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "livefirettx"
+version = "1.0.0"
+description = "Safe, local-first live-fire tabletop exercise orchestration"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "LicenseRef-FSL-1.1-ALv2"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Steve Manzuik" }]
+dependencies = [
+  "fastapi==0.128.8",
+  "starlette==0.49.3",
+  "uvicorn==0.39.0",
+  "jinja2==3.1.6",
+  "pydantic==2.13.4",
+  "PyYAML==6.0.2",
+]
+
+[project.scripts]
+livefirettx = "app.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.setuptools.package-data]
+app = [
+  "templates/*.html",
+  "templates/static/*.css",
+  "templates/static/*.js",
+  "templates/static/*.svg",
+  "services/templates/*.tmpl",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]
+
+[tool.mypy]
+python_version = "3.11"
+check_untyped_defs = true
+ignore_missing_imports = true
+no_implicit_optional = true
+warn_unused_ignores = true
+
+[tool.coverage.run]
+branch = true
+source = ["app"]
+omit = [
+  "app/cli.py",
+  "app/main.py",
+]
+
+[tool.coverage.report]
+fail_under = 75
+show_missing = true
+skip_covered = true

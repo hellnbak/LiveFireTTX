@@ -142,13 +142,24 @@ def build_exercise_intelligence(
 
 def summarize_run(run: dict[str, Any]) -> dict[str, Any]:
     peak = peak_conditions(run)
+    dependency_rate = max(
+        peak["object_storage_throttle_rate"],
+        peak["payment_failure_rate"],
+        peak["telemetry_gap_rate"],
+        peak["third_party_error_rate"],
+    )
+    access_rate = max(
+        peak["auth_failure_rate"],
+        peak["dns_failure_rate"],
+    )
     impact_score = min(
         100,
         round(
-            min(1, peak["latency_ms"] / 5000) * 35
-            + peak["error_rate"] * 25
-            + peak["auth_failure_rate"] * 20
-            + peak["dns_failure_rate"] * 20
+            min(1, peak["latency_ms"] / 5000) * 25
+            + peak["error_rate"] * 20
+            + access_rate * 15
+            + dependency_rate * 25
+            + min(1, peak["queue_backlog_depth"] / 1000) * 15
         ),
     )
     return {
@@ -173,6 +184,11 @@ def peak_conditions(run: dict[str, Any]) -> dict[str, float]:
         "error_rate": 0.0,
         "auth_failure_rate": 0.0,
         "dns_failure_rate": 0.0,
+        "object_storage_throttle_rate": 0.0,
+        "payment_failure_rate": 0.0,
+        "queue_backlog_depth": 0,
+        "telemetry_gap_rate": 0.0,
+        "third_party_error_rate": 0.0,
     }
     snapshots = [
         run.get("before_snapshot"),
@@ -192,7 +208,16 @@ def peak_conditions(run: dict[str, Any]) -> dict[str, float]:
             except (TypeError, ValueError):
                 continue
     peak["latency_ms"] = round(peak["latency_ms"])
-    for field in {"error_rate", "auth_failure_rate", "dns_failure_rate"}:
+    peak["queue_backlog_depth"] = round(peak["queue_backlog_depth"])
+    for field in {
+        "auth_failure_rate",
+        "dns_failure_rate",
+        "error_rate",
+        "object_storage_throttle_rate",
+        "payment_failure_rate",
+        "telemetry_gap_rate",
+        "third_party_error_rate",
+    }:
         peak[field] = round(peak[field], 4)
     return peak
 

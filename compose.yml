@@ -1,0 +1,16 @@
+services:
+  livefirettx:
+    build: .
+    ports:
+      - "127.0.0.1:${LIVEFIRE_APP_HOST_PORT:-8000}:8000"
+    environment:
+      LIVEFIRE_ALLOW_CONTAINER_HOST: "true"
+      LIVEFIRE_CONTROL_URL: "http://host.docker.internal:${LIVEFIRE_CONTROL_HOST_PORT:-8090}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - livefirettx-data:/data
+    restart: unless-stopped
+
+volumes:
+  livefirettx-data:

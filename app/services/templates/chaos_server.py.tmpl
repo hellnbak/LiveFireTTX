@@ -8,10 +8,13 @@ import os
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 from typing import Optional
 
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from engine import (
     abort,
@@ -44,6 +47,25 @@ from engine import (
 EXERCISE_ID = "__EXERCISE_ID__"
 TARGET_URL = os.environ.get("LIVEFIRE_TARGET_URL", "http://livefire-target:8088")
 LOGGER = logging.getLogger("livefire.chaos")
+APPROVED_HOSTS = {
+    "127.0.0.1",
+    "localhost",
+    "::1",
+    "host.docker.internal",
+    "testserver",
+}
+MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def target_resource(path):
+    try:
+        with urllib.request.urlopen(f"{TARGET_URL}{path}", timeout=1) as response:
+            return json.loads(response.read())
+    except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Target resource unavailable: {exc}",
+        ) from exc
 
 
 def target_snapshot():
@@ -199,9 +221,62 @@ app = FastAPI(
         "Scenario-scoped fault patterns and deterministic playbooks with safety "
         "budgets, target preflight, live telemetry, and automatic rollback."
     ),
-    version="0.4.0",
+    version="1.0.0",
     lifespan=lifespan,
 )
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=[
+        "127.0.0.1",
+        "localhost",
+        "[::1]",
+        "host.docker.internal",
+        "testserver",
+    ],
+)
+
+
+def same_local_origin(request, origin):
+    try:
+        candidate = urlsplit(origin)
+        request_origin = urlsplit(
+            f"{request.url.scheme}://{request.headers.get('host', '')}"
+        )
+        candidate_port = candidate.port or 80
+        request_port = request_origin.port or 80
+    except ValueError:
+        return False
+    return bool(
+        candidate.scheme == request.url.scheme == "http"
+        and candidate.hostname in APPROVED_HOSTS
+        and request_origin.hostname in APPROVED_HOSTS
+        and candidate_port == request_port
+        and candidate.username is None
+        and candidate.password is None
+        and candidate.path in {"", "/"}
+        and not candidate.query
+        and not candidate.fragment
+    )
+
+
+@app.middleware("http")
+async def protect_mutations(request: Request, call_next):
+    origin = request.headers.get("origin")
+    fetch_site = request.headers.get("sec-fetch-site", "").lower()
+    opaque_same_origin = origin == "null" and fetch_site == "same-origin"
+    if request.method in MUTATING_METHODS and (
+        (
+            origin is not None
+            and not opaque_same_origin
+            and not same_local_origin(request, origin)
+        )
+        or (origin is None and fetch_site == "cross-site")
+    ):
+        return JSONResponse(
+            {"detail": "Cross-origin state changes are not allowed"},
+            status_code=403,
+        )
+    return await call_next(request)
 
 
 class ActionRequest(BaseModel):
@@ -234,9 +309,28 @@ def health():
     }
 
 
+@app.get("/ready")
+def ready():
+    snapshot = target_snapshot()
+    is_ready = snapshot["reachable"] and snapshot["matches_exercise"]
+    return JSONResponse(
+        {
+            "ready": is_ready,
+            "exercise_id": EXERCISE_ID,
+            "target": snapshot,
+        },
+        status_code=200 if is_ready else 503,
+    )
+
+
 @app.get("/actions")
 def actions():
     return {"actions": available_actions()}
+
+
+@app.get("/dependencies")
+def dependencies():
+    return target_resource("/dependencies")
 
 
 @app.get("/state")

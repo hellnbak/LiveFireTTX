@@ -3,9 +3,15 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
+from urllib.parse import parse_qs, urlsplit
+import json
+import logging
+import uuid
 
-from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
@@ -15,9 +21,11 @@ from fastapi.responses import (
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.models import (
     ExerciseCreate,
+    InjectOption,
     SCENARIO_LIBRARY,
     add_event,
     get_exercise,
@@ -32,6 +40,8 @@ from app.models import (
     save_exercise,
     save_injects,
 )
+from app.routes.packages import router as packages_router
+from app.routes.system import router as system_router
 from app.services.artifacts import (
     ARTIFACT_KINDS,
     artifact_trigger_result,
@@ -54,6 +64,7 @@ from app.services.runtime import (
     export_playbook_configuration,
     read_chaos_state,
     read_control_status,
+    read_dependency_status,
     read_playbook_configuration,
     read_playbook_definition,
     read_playbook_library,
@@ -65,13 +76,173 @@ from app.services.runtime import (
     start_chaos_playbook,
     validate_playbook_configuration,
 )
+from app.services.packages import (
+    dependency_map,
+    list_participant_briefs,
+)
 from app.version import __version__
 
 BASE = Path(__file__).resolve().parent
-app = FastAPI(title="LiveFireTTX", version=__version__)
+LOGGER = logging.getLogger("livefirettx")
+if not LOGGER.handlers:
+    log_handler = logging.StreamHandler()
+    log_handler.setFormatter(logging.Formatter("%(message)s"))
+    LOGGER.addHandler(log_handler)
+LOGGER.setLevel(logging.INFO)
+LOGGER.propagate = False
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "testserver"}
+MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+app = FastAPI(
+    title="LiveFireTTX",
+    version=__version__,
+    description="Local-first live-fire tabletop exercise orchestration.",
+)
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=["127.0.0.1", "localhost", "[::1]", "testserver"],
+)
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 templates.env.globals["app_version"] = __version__
 app.mount("/static", StaticFiles(directory=str(BASE / "templates" / "static")), name="static")
+app.include_router(system_router)
+app.include_router(packages_router)
+
+
+async def _form_fields(
+    request: Request,
+    maximum_bytes: int = 64 * 1024,
+) -> dict[str, str]:
+    content_type = request.headers.get("content-type", "").split(";", 1)[0]
+    if content_type != "application/x-www-form-urlencoded":
+        raise HTTPException(415, "Expected URL-encoded form data")
+    body = await request.body()
+    if len(body) > maximum_bytes:
+        raise HTTPException(413, "Form submission is too large")
+    try:
+        parsed = parse_qs(
+            body.decode("utf-8"),
+            keep_blank_values=True,
+            max_num_fields=50,
+            strict_parsing=False,
+        )
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise HTTPException(400, "Form submission is invalid") from exc
+    return {key: values[-1] for key, values in parsed.items() if values}
+
+
+def _field(
+    fields: dict[str, str],
+    name: str,
+    default: str | None = None,
+) -> str:
+    value = fields.get(name, default)
+    if value is None:
+        raise HTTPException(422, f"Missing form field: {name}")
+    return value
+
+
+def _integer_field(
+    fields: dict[str, str],
+    name: str,
+    default: int,
+) -> int:
+    try:
+        return int(_field(fields, name, str(default)))
+    except ValueError as exc:
+        raise HTTPException(422, f"{name} must be an integer") from exc
+
+
+def _same_local_origin(request: Request, origin: str) -> bool:
+    try:
+        candidate = urlsplit(origin)
+        request_origin = urlsplit(
+            f"{request.url.scheme}://{request.headers.get('host', '')}"
+        )
+        candidate_port = candidate.port or 80
+        request_port = request_origin.port or 80
+    except ValueError:
+        return False
+    return bool(
+        candidate.scheme == request.url.scheme == "http"
+        and candidate.hostname in LOOPBACK_HOSTS
+        and request_origin.hostname in LOOPBACK_HOSTS
+        and candidate_port == request_port
+        and candidate.username is None
+        and candidate.password is None
+        and candidate.path in {"", "/"}
+        and not candidate.query
+        and not candidate.fragment
+    )
+
+
+@app.middleware("http")
+async def request_context(request: Request, call_next):
+    request_id = uuid.uuid4().hex
+    started = datetime.now(timezone.utc)
+    origin = request.headers.get("origin")
+    fetch_site = request.headers.get("sec-fetch-site", "").lower()
+    opaque_same_origin = origin == "null" and fetch_site == "same-origin"
+    if request.method in MUTATING_METHODS and (
+        (
+            origin is not None
+            and not opaque_same_origin
+            and not _same_local_origin(request, origin)
+        )
+        or (origin is None and fetch_site == "cross-site")
+    ):
+        LOGGER.warning(
+            json.dumps(
+                {
+                    "event": "request_rejected",
+                    "reason": "cross_origin_mutation",
+                    "method": request.method,
+                    "path": request.url.path,
+                    "origin": origin,
+                    "host": request.headers.get("host"),
+                    "sec_fetch_site": fetch_site or None,
+                },
+                sort_keys=True,
+            )
+        )
+        response = JSONResponse(
+            {"detail": "Cross-origin state changes are not allowed"},
+            status_code=403,
+        )
+    else:
+        response = await call_next(request)
+    completed = datetime.now(timezone.utc)
+    elapsed_ms = round(
+        (completed - started).total_seconds() * 1000,
+        2,
+    )
+    response.headers["X-Request-ID"] = request_id
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = (
+        "camera=(), microphone=(), geolocation=(), payment=()"
+    )
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; base-uri 'none'; form-action 'self'; "
+        "frame-ancestors 'none'; object-src 'none'; img-src 'self' data:; "
+        "script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+        "connect-src 'self'"
+    )
+    LOGGER.info(
+        json.dumps(
+            {
+                "event": "request_completed",
+                "timestamp": completed.isoformat(),
+                "request_id": request_id,
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": response.status_code,
+                "elapsed_ms": elapsed_ms,
+            },
+            sort_keys=True,
+        )
+    )
+    return response
 
 
 def _exercise_evidence(exercise):
@@ -95,25 +266,43 @@ def startup() -> None:
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request, "exercises": list_exercises(), "scenarios": SCENARIO_LIBRARY})
+    return templates.TemplateResponse(
+        request,
+        "index.html",
+        {
+            "exercises": list_exercises(),
+            "scenarios": SCENARIO_LIBRARY,
+        },
+    )
 
 
 @app.get("/new", response_class=HTMLResponse)
 def new_exercise(request: Request):
-    return templates.TemplateResponse("new.html", {"request": request, "scenarios": SCENARIO_LIBRARY})
+    return templates.TemplateResponse(
+        request,
+        "new.html",
+        {"scenarios": SCENARIO_LIBRARY},
+    )
 
 
 @app.post("/exercises")
-def create_exercise(
-    name: str = Form(...),
-    scenario_type: str = Form(...),
-    platform: str = Form("local_docker"),
-    business_system: str = Form("Order Processing"),
-    difficulty: str = Form("intermediate"),
-    duration_minutes: int = Form(90),
-    participants: str = Form("Incident Commander, Security Operations, Cloud/IT Operations, Communications, Business Owner"),
-    objectives: str = Form(""),
-):
+async def create_exercise(request: Request):
+    fields = await _form_fields(request)
+    name = _field(fields, "name")
+    scenario_type = _field(fields, "scenario_type")
+    platform = _field(fields, "platform", "local_docker")
+    business_system = _field(fields, "business_system", "Order Processing")
+    difficulty = _field(fields, "difficulty", "intermediate")
+    duration_minutes = _integer_field(fields, "duration_minutes", 90)
+    participants = _field(
+        fields,
+        "participants",
+        (
+            "Incident Commander, Security Operations, Cloud/IT Operations, "
+            "Communications, Business Owner"
+        ),
+    )
+    objectives = _field(fields, "objectives", "")
     name = name.strip()
     business_system = business_system.strip()
     if not name or len(name) > 120:
@@ -159,7 +348,7 @@ def exercise_detail(request: Request, exercise_id: str):
     if not ex:
         raise HTTPException(404, "Exercise not found")
     injects, events, chaos_state, intelligence = _exercise_evidence(ex)
-    by_stage = {}
+    by_stage: dict[str, list[InjectOption]] = {}
     for i in injects:
         by_stage.setdefault(i.stage, []).append(i)
     chaos_actions = []
@@ -178,15 +367,26 @@ def exercise_detail(request: Request, exercise_id: str):
         if playbook_library
         else {}
     )
+    control_status = read_control_status(ex)
+    dependencies: dict[str, Any] = (
+        read_dependency_status(ex)
+        if control_status.get("matches_exercise")
+        else {"reachable": False, "dependencies": []}
+    )
+    dependency_status_by_id = {
+        item.get("id"): item
+        for item in dependencies.get("dependencies", [])
+        if isinstance(item, dict)
+    }
     return templates.TemplateResponse(
+        request,
         "exercise.html",
         {
-            "request": request,
             "exercise": ex,
             "injects_by_stage": by_stage,
             "events": events,
             "chaos_state": chaos_state,
-            "control_status": read_control_status(ex),
+            "control_status": control_status,
             "playbook_configuration": read_playbook_configuration(ex),
             "playbook_library": playbook_library,
             "designer_playbook": designer_playbook,
@@ -194,18 +394,25 @@ def exercise_detail(request: Request, exercise_id: str):
             "artifact_kinds": ARTIFACT_KINDS,
             "intelligence": intelligence,
             "rating_labels": RATING_LABELS,
+            "scenario": SCENARIO_LIBRARY[ex.scenario_type],
+            "dependency_map": dependency_map(ex),
+            "dependency_status": dependencies,
+            "dependency_status_by_id": dependency_status_by_id,
+            "participant_briefs": list_participant_briefs(ex),
         },
     )
 
 
 @app.post("/injects/{inject_id}/trigger")
-def trigger_inject(
+async def trigger_inject(
+    request: Request,
     inject_id: str,
-    intensity: str = Form("medium"),
-    duration_seconds: int = Form(300),
-    guardrail_profile: str = Form("standard"),
-    pattern: str = Form("steady"),
 ):
+    fields = await _form_fields(request)
+    intensity = _field(fields, "intensity", "medium")
+    duration_seconds = _integer_field(fields, "duration_seconds", 300)
+    guardrail_profile = _field(fields, "guardrail_profile", "standard")
+    pattern = _field(fields, "pattern", "steady")
     inj = get_inject(inject_id)
     if not inj:
         raise HTTPException(404, "Inject not found")
@@ -260,7 +467,8 @@ def trigger_inject(
 
 
 @app.post("/exercises/{exercise_id}/chaos/reset")
-def reset_exercise_chaos(exercise_id: str, action: str = Form("")):
+async def reset_exercise_chaos(request: Request, exercise_id: str):
+    action = _field(await _form_fields(request), "action", "")
     ex = get_exercise(exercise_id)
     if not ex:
         raise HTTPException(404, "Exercise not found")
@@ -308,21 +516,30 @@ def exercise_chaos_status(exercise_id: str):
     ex = get_exercise(exercise_id)
     if not ex:
         raise HTTPException(404, "Exercise not found")
+    control_status = read_control_status(ex)
+    dependencies = (
+        read_dependency_status(ex)
+        if control_status.get("matches_exercise")
+        else {"reachable": False, "dependencies": []}
+    )
     return JSONResponse(
         {
             "state": read_chaos_state(ex),
-            "control": read_control_status(ex),
+            "control": control_status,
+            "dependencies": dependencies,
         }
     )
 
 
 @app.post("/exercises/{exercise_id}/objectives/{objective_index}")
-def assess_exercise_objective(
+async def assess_exercise_objective(
+    request: Request,
     exercise_id: str,
     objective_index: int,
-    rating: str = Form(...),
-    notes: str = Form(""),
 ):
+    fields = await _form_fields(request)
+    rating = _field(fields, "rating")
+    notes = _field(fields, "notes", "")
     ex = get_exercise(exercise_id)
     if not ex:
         raise HTTPException(404, "Exercise not found")
@@ -401,10 +618,14 @@ def download_evidence_package(exercise_id: str):
 
 
 @app.post("/exercises/{exercise_id}/playbooks")
-def save_exercise_playbook(
+async def save_exercise_playbook(
+    request: Request,
     exercise_id: str,
-    playbook_yaml: str = Form(...),
 ):
+    playbook_yaml = _field(
+        await _form_fields(request, maximum_bytes=96 * 1024),
+        "playbook_yaml",
+    )
     ex = get_exercise(exercise_id)
     if not ex:
         raise HTTPException(404, "Exercise not found")
@@ -477,12 +698,14 @@ def save_designer_playbook(
 
 
 @app.post("/exercises/{exercise_id}/playbooks/{playbook_id}/clone")
-def clone_exercise_playbook(
+async def clone_exercise_playbook(
+    request: Request,
     exercise_id: str,
     playbook_id: str,
-    new_playbook_id: str = Form(...),
-    new_name: str = Form(...),
 ):
+    fields = await _form_fields(request)
+    new_playbook_id = _field(fields, "new_playbook_id")
+    new_name = _field(fields, "new_name")
     ex = get_exercise(exercise_id)
     if not ex:
         raise HTTPException(404, "Exercise not found")
@@ -510,16 +733,19 @@ def clone_exercise_playbook(
 
 @app.post("/exercises/{exercise_id}/playbooks/import")
 async def import_exercise_playbook(
+    request: Request,
     exercise_id: str,
-    playbook_file: UploadFile = File(...),
 ):
     ex = get_exercise(exercise_id)
     if not ex:
         raise HTTPException(404, "Exercise not found")
-    filename = playbook_file.filename or ""
-    if not filename.lower().endswith((".yml", ".yaml")):
-        raise HTTPException(400, "Playbook import must be a YAML file")
-    content = await playbook_file.read(64 * 1024 + 1)
+    content_type = request.headers.get("content-type", "").split(";", 1)[0]
+    if content_type not in {"application/yaml", "text/yaml", "text/plain"}:
+        raise HTTPException(415, "Playbook import must use a YAML content type")
+    filename = request.headers.get("x-livefire-filename", "imported-playbook.yml")
+    if len(filename) > 120 or not filename.lower().endswith((".yml", ".yaml")):
+        raise HTTPException(400, "Playbook filename must end in .yml or .yaml")
+    content = await request.body()
     if len(content) > 64 * 1024:
         raise HTTPException(400, "Playbook configuration is too large")
     try:
@@ -682,14 +908,16 @@ def skip_exercise_playbook_stage(
 
 
 @app.post("/exercises/{exercise_id}/artifacts")
-def create_exercise_artifact(
+async def create_exercise_artifact(
+    request: Request,
     exercise_id: str,
-    title: str = Form(...),
-    audience: str = Form(...),
-    stage: str = Form(...),
-    artifact_kind: str = Form(...),
-    content: str = Form(...),
 ):
+    fields = await _form_fields(request)
+    title = _field(fields, "title")
+    audience = _field(fields, "audience")
+    stage = _field(fields, "stage")
+    artifact_kind = _field(fields, "artifact_kind")
+    content = _field(fields, "content")
     ex = get_exercise(exercise_id)
     if not ex:
         raise HTTPException(404, "Exercise not found")
@@ -719,10 +947,17 @@ def create_exercise_artifact(
 
 
 @app.post("/exercises/{exercise_id}/events")
-def add_manual_event(exercise_id: str, title: str = Form(...), detail: str = Form(...)):
+async def add_manual_event(request: Request, exercise_id: str):
+    fields = await _form_fields(request)
+    title = _field(fields, "title").strip()
+    detail = _field(fields, "detail").strip()
     ex = get_exercise(exercise_id)
     if not ex:
         raise HTTPException(404, "Exercise not found")
+    if not title or len(title) > 120:
+        raise HTTPException(400, "Event title must be between 1 and 120 characters")
+    if not detail or len(detail) > 5000:
+        raise HTTPException(400, "Event detail must be between 1 and 5000 characters")
     add_event(exercise_id, "manual_note", title, detail)
     return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
 

@@ -1,133 +1,129 @@
 # LiveFireTTX Architecture
 
-LiveFireTTX is intentionally local-first. Version 0.6 uses a FastAPI facilitator app, Jinja2 templates, SQLite persistence, exercise-intelligence and artifact services, and generated Docker Compose labs with a separate chaos orchestration service.
+LiveFireTTX v1.0 is intentionally local-first. The facilitator application uses
+FastAPI, Jinja2, SQLite, and filesystem-backed generated packages. Every
+exercise receives a separate Docker Compose target and chaos controller bound
+to localhost.
 
-## Core flow
+## Core Flow
 
 ```text
-Facilitator input
-  -> ExerciseCreate request
-  -> Scenario library lookup
-  -> Exercise + inject options
-  -> Generated package
-  -> Facilitator console
-  -> Triggered injects / safe chaos controller
-  -> Shared simulation state
-  -> Observable target behavior
-  -> Objective assessment + run intelligence
-  -> Run log
-  -> Evidence package + after-action report
+Guided scenario preset
+  -> validated exercise definition
+  -> role briefs + sample data + dependency map
+  -> generated target and scenario-scoped controller
+  -> facilitator injects and bounded playbooks
+  -> shared synthetic state
+  -> observable dependency behavior
+  -> objective assessment and run intelligence
+  -> evidence archive and after-action report
 ```
 
-## Components
+## Application Components
 
-### Scenario Builder
+### Configuration
 
-The web form captures scenario type, business system, difficulty, participants, duration, and objectives.
+`app/config.py` resolves database, generated-package, backup, controller, and
+timeout settings. The v1.0 controller URL is restricted to localhost.
 
-### Scenario Library
+### Persistence
 
-`app/models.py` contains the starter scenario library. Each scenario defines labels, descriptions, target modules, chaos modules, and default objectives.
+`app/models.py` owns SQLite access. Ordered migrations are recorded in
+`schema_migrations`. Connections enable foreign keys, a busy timeout, and WAL.
+Health checks run SQLite quick-check and expose the active schema version.
 
-### Exercise Generator
+`app/services/backups.py` uses SQLite's backup API to create a consistent
+snapshot, packages generated exercises with a versioned manifest, validates ZIP
+paths and symlinks, checks database integrity, and rejects newer schema versions
+before restore.
+
+### Scenario and Exercise Generation
+
+`app/models.py` defines scenario presets, dependency topology, recommended
+roles, target modules, safe chaos modules, and default objectives.
 
 `app/services/generator.py` and `app/services/lab_renderer.py` create:
 
-- `exercise.yml`
-- `facilitator_guide.md`
-- `participant_brief.md`
-- `target/` Docker Compose lab
-- `chaos/` scenario-scoped API, CLI, state engine, and artifacts
-- `artifacts/` exercise artifacts
-- `reports/after_action_template.md`
-- `cleanup/destroy.sh`
+- Exercise and chaos-plan YAML
+- Facilitator guide and readiness checklist
+- Shared and role-specific participant briefs
+- Simulated orders, dependencies, and communications data
+- Target and chaos-controller Docker sources
+- Safe artifacts and reports
+- Cleanup scripts
 
-### Facilitator Command Center
+### HTTP and UI
 
-The console groups injects by stage and lets the exercise leader manually trigger each inject. It also displays live condition telemetry, active fault patterns, playbook safety budgets, and orchestration timelines. Facilitators can edit validated YAML, launch or replay playbooks, pause future scheduling, skip stages, stop runs, reset state, or activate the global emergency stop. Trigger counts and action results are stored in SQLite and shown in the run log.
+`app/main.py` hosts the facilitator workflow and inject/playbook routes.
+`app/routes/system.py` contains operational health, readiness, and backup
+endpoints. `app/routes/packages.py` serves path-contained participant material.
+
+The Jinja2 interface includes guided scenario setup, dependency topology,
+exercise intelligence, artifact design, live telemetry, run control, and the
+visual playbook editor. Browser checks improve feedback, while the generated
+controller remains authoritative for playbook validation.
 
 ### Exercise Intelligence
 
-`app/services/intelligence.py` combines objective assessments, facilitator
-events, inject coverage, chaos lifecycles, playbook outcomes, observations, and
-artifact references into explainable exercise signals. It does not infer that an
-objective was met; only the facilitator can assign a rubric rating.
+`app/services/intelligence.py` combines facilitator ratings, events, inject
+coverage, run lifecycles, playbook outcomes, observations, and artifacts.
+Impact comparison includes application, access, payment, queue, storage,
+third-party, and telemetry signals. Facilitators—not the application—determine
+whether objectives were achieved.
 
-The service calculates normalized run-impact comparisons from observed latency,
-error, authentication, and DNS conditions. It also generates an after-action
-Markdown report and a ZIP evidence package containing Markdown, CSV, JSON state,
-and a manifest. Objective ratings and notes are persisted in SQLite, while
-generated reports are written into the exercise package under `reports/`.
+## Generated Dependency Target
 
-### Scenario Design Studio
+The target reads shared controller state and exposes:
 
-The visual designer edits the same playbook schema used by the generated chaos
-controller. Browser-side checks provide immediate feedback for IDs,
-dependencies, cycles, timing, and designed budget peaks. The controller remains
-the source of truth and performs the final allowlist and safety validation before
-save or launch.
+- Application, order, authentication, DNS, backup, and build endpoints
+- Payment authorization
+- Queue health and consumer delay
+- Object reads with synthetic throttling and stale responses
+- Third-party availability and retry pressure
+- Delayed or missing synthetic telemetry
+- A dependency map with live healthy/degraded status
 
-Playbook files are stored under `chaos/playbooks/`. When an accepted definition
-changes, the prior YAML is copied into an ID-scoped `history/` directory.
-Templates can be cloned, imported, exported, or restored without adding another
-database or bypassing controller validation.
+Expired action effects are ignored by the target even when the controller is
+temporarily unavailable.
 
-### Safe Artifact Designer
-
-`app/services/artifacts.py` creates facilitator-defined messages, alerts,
-tickets, and advisories under `artifacts/facilitator/`. Filenames are generated
-internally, content is size-limited, and every file is visibly marked as
-simulated. The resulting item is persisted as a normal artifact inject so its
-creation and trigger are included in the exercise event log and evidence export.
-
-### Target Environment
-
-The target environment is generated per exercise. It exposes safe business and dependency endpoints that react to shared simulation conditions such as latency, application errors, authentication failures, DNS failures, backup delays, blocked builds, and seeded-record integrity issues.
-
-### Chaos Orchestration Control Plane
-
-The chaos environment is generated separately from the target environment and runs on `127.0.0.1:8090`. Its API and CLI share an allowlisted lifecycle engine. Each generated exercise contains only the actions relevant to its scenario and one editable scenario playbook. State updates use file locking and atomic replacement, while synthetic artifacts, playbook snapshots, seeds, and run observations are retained for exercise evidence.
+## Chaos Control Plane
 
 ```text
-Facilitator Console or Chaos API
-  -> Controller and target preflight
-  -> Scenario action allowlist
-  -> Manual action or validated playbook
-  -> Intensity + fault pattern + duration
-  -> Concurrency + severity + time budgets
-  -> Pending run
-  -> Locked state update
-  -> Active run
-  -> Synthetic artifact
-  -> Target reads shared state
-  -> Observable simulated impact
-  -> Duration elapsed or guardrail violation
-  -> Automatic rollback
-  -> Completed / aborted / failed run
+Facilitator Console / API / CLI
+  -> exercise identity and target preflight
+  -> scenario action allowlist
+  -> validated manual action or captured playbook
+  -> bounded duration + intensity + pattern
+  -> concurrency + severity + total-time budgets
+  -> atomic state update and synthetic artifact
+  -> target observation and guardrail checks
+  -> automatic completion, abort, or failure
+  -> retained evidence and reversible state
 ```
 
-The controller scheduler evaluates playbook stages and fault patterns every second. It records target
-observations and aborts runs when the target becomes unreachable, reports a
-different exercise ID, or exceeds configured latency or error-rate thresholds.
-The target independently ignores expired effects, preserving rollback behavior
-if the controller is temporarily unavailable.
+The controller uses file locking and atomic replacement. Active playbook stages
+capture their definition and replay seed so later edits cannot alter historical
+execution. Pausing prevents future scheduling without extending active actions.
 
-Playbook stages are copied into each run so later configuration edits cannot
-change an active or historical execution. Replays reuse that captured definition
-and seed. Pausing stops future stage scheduling but intentionally leaves active,
-bounded action runs in place until they expire, are skipped, or are stopped.
+## Safety Boundary
 
-### Runtime Safety Boundary
+`app/services/runtime.py` verifies controller metadata, exercise identity,
+options, duration, patterns, and guardrails. YAML is size-limited and loaded
+safely. Package and artifact paths are resolved and contained. The controller
+accepts no shell commands, executable payloads, arbitrary target addresses, or
+operator-selected output paths.
 
-`app/services/runtime.py` verifies the running controller and target belong to the selected exercise, validates intensity, pattern, duration, and guardrail selections, and routes v0.4 actions and playbook controls through the orchestration API. YAML configuration is size-limited, parsed safely, validated by the scenario-scoped engine, and persisted only after the controller accepts it. Legacy package execution remains path-contained and time-bounded.
+## Release Architecture
 
-## Future renderers
+- `pyproject.toml` defines the installable application and `livefirettx` CLI.
+- `Dockerfile` and `compose.yml` provide a localhost-bound application runtime.
+- `.github/workflows/ci.yml` validates Python 3.11–3.13 and generated packages.
+- `.github/workflows/codeql.yml` performs scheduled and pull-request analysis.
+- `.github/workflows/release.yml` builds artifacts only after release gates pass.
+- `scripts/docker_release_smoke.sh` exercises generated target deployment,
+  preflight, bounded dependency injection, reset, and teardown.
 
-The generator is structured so additional renderers can be added later:
+## Future Renderers
 
-- AWS Terraform
-- AWS Fault Injection Service templates
-- Azure Chaos Studio
-- Kubernetes / Helm
-- SIEM / EDR synthetic alert connectors
-- Jira / ServiceNow / Slack / Teams inject delivery
+Cloud and enterprise renderers remain adapters around the stable scenario and
+evidence model. They are not part of the v1.0 local safety contract.

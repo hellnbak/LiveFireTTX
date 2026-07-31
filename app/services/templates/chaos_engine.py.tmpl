@@ -14,7 +14,7 @@ except ImportError:
     fcntl = None
 
 
-CONTROL_VERSION = "0.4.0"
+CONTROL_VERSION = "1.0.0"
 ROOT = Path(__file__).resolve().parent
 STATE_DIR = Path(os.environ.get("LIVEFIRE_STATE_DIR", ROOT / "state"))
 ARTIFACTS_DIR = Path(
@@ -81,6 +81,21 @@ ACTION_CATALOG = {
         "description": "Makes the simulated DNS dependency fail at a controlled rate.",
         "reversible": True,
     },
+    "object_storage_throttle": {
+        "label": "Object Storage Throttling",
+        "description": "Adds synthetic throttling and stale reads to local object storage.",
+        "reversible": True,
+    },
+    "payment_failure": {
+        "label": "Payment Processor Failure",
+        "description": "Makes simulated payment authorization fail at a controlled rate.",
+        "reversible": True,
+    },
+    "queue_backlog": {
+        "label": "Queue Backlog",
+        "description": "Builds a synthetic backlog and delays the local consumer.",
+        "reversible": True,
+    },
     "safe_file_impact": {
         "label": "Safe File Impact",
         "description": "Renames generated test files and creates a simulated note.",
@@ -89,6 +104,16 @@ ACTION_CATALOG = {
     "synthetic_edr_alert": {
         "label": "Synthetic EDR Alerts",
         "description": "Creates safe alerts without executing malicious behavior.",
+        "reversible": True,
+    },
+    "telemetry_gap": {
+        "label": "Observability Gap",
+        "description": "Delays or drops simulated telemetry without hiding real activity.",
+        "reversible": True,
+    },
+    "third_party_degradation": {
+        "label": "Third-Party API Degradation",
+        "description": "Adds controlled vendor API failures and rate-limit responses.",
         "reversible": True,
     },
 }
@@ -101,6 +126,15 @@ DEFAULT_CONDITIONS = {
     "backup_delay": False,
     "build_blocked": False,
     "file_impact": False,
+    "object_storage_throttle_rate": 0.0,
+    "payment_failure_rate": 0.0,
+    "queue_backlog_depth": 0,
+    "queue_consumer_delay_ms": 0,
+    "stale_read_rate": 0.0,
+    "telemetry_delay_seconds": 0,
+    "telemetry_gap_rate": 0.0,
+    "third_party_error_rate": 0.0,
+    "third_party_retry_after_seconds": 0,
 }
 ACTION_FIELDS = {
     "app_degradation": ("latency_ms", "error_rate"),
@@ -109,8 +143,19 @@ ACTION_FIELDS = {
     "data_corruption": ("data_integrity",),
     "dependency_alert": ("build_blocked",),
     "dns_failure": ("dns_failure_rate",),
+    "object_storage_throttle": (
+        "object_storage_throttle_rate",
+        "stale_read_rate",
+    ),
+    "payment_failure": ("payment_failure_rate",),
+    "queue_backlog": ("queue_backlog_depth", "queue_consumer_delay_ms"),
     "safe_file_impact": ("file_impact",),
     "synthetic_edr_alert": (),
+    "telemetry_gap": ("telemetry_delay_seconds", "telemetry_gap_rate"),
+    "third_party_degradation": (
+        "third_party_error_rate",
+        "third_party_retry_after_seconds",
+    ),
 }
 
 
@@ -125,7 +170,7 @@ def parse_timestamp(value):
 
 def default_state():
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "control_version": CONTROL_VERSION,
         "revision": 0,
         "updated_at": timestamp(),
@@ -162,7 +207,7 @@ def normalize_state(state):
     state.setdefault("history", [])
     state.setdefault("revision", 0)
     state.setdefault("updated_at", timestamp())
-    state["schema_version"] = 4
+    state["schema_version"] = 5
     state["control_version"] = CONTROL_VERSION
     known_run_ids = {run.get("id") for run in state["runs"]}
     for action, active in state["active_actions"].items():
@@ -585,8 +630,25 @@ def effect_for(action, profile):
         "data_corruption": {"data_integrity": True},
         "dependency_alert": {"build_blocked": True},
         "dns_failure": {"dns_failure_rate": profile["rate"]},
+        "object_storage_throttle": {
+            "object_storage_throttle_rate": profile["rate"],
+            "stale_read_rate": profile["error_rate"],
+        },
+        "payment_failure": {"payment_failure_rate": profile["rate"]},
+        "queue_backlog": {
+            "queue_backlog_depth": profile["count"] * 100,
+            "queue_consumer_delay_ms": profile["latency_ms"],
+        },
         "safe_file_impact": {"file_impact": True},
         "synthetic_edr_alert": {},
+        "telemetry_gap": {
+            "telemetry_delay_seconds": profile["count"] * 15,
+            "telemetry_gap_rate": profile["error_rate"],
+        },
+        "third_party_degradation": {
+            "third_party_error_rate": profile["rate"],
+            "third_party_retry_after_seconds": profile["count"] * 3,
+        },
     }
     return effects[action]
 
@@ -1324,6 +1386,26 @@ def artifact_markdown(action, intensity, profile):
         "dns_failure": (
             f"The simulated DNS dependency fails approximately "
             f"{profile['rate']:.0%} of checks."
+        ),
+        "object_storage_throttle": (
+            f"Object reads throttle approximately {profile['rate']:.0%} of the "
+            f"time and may return stale simulated data."
+        ),
+        "payment_failure": (
+            f"The simulated payment processor fails approximately "
+            f"{profile['rate']:.0%} of authorization requests."
+        ),
+        "queue_backlog": (
+            f"The simulated queue contains {profile['count'] * 100} messages "
+            f"with {profile['latency_ms']} ms consumer delay."
+        ),
+        "telemetry_gap": (
+            f"Telemetry is delayed by {profile['count'] * 15} seconds with "
+            f"{profile['error_rate']:.0%} missing samples."
+        ),
+        "third_party_degradation": (
+            f"The simulated vendor API fails approximately "
+            f"{profile['rate']:.0%} of requests and requests retries."
         ),
     }
     title = ACTION_CATALOG[action]["label"]

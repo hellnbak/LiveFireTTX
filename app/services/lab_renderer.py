@@ -12,11 +12,11 @@ import stat
 
 import yaml
 
-from app.models import Exercise, InjectOption
+from app.models import Exercise, InjectOption, SCENARIO_LIBRARY
 
 
 TEMPLATE_ROOT = Path(__file__).resolve().parent / "templates"
-CONTROL_VERSION = "0.4.0"
+CONTROL_VERSION = "1.0.0"
 ACTION_CATALOG: dict[str, dict[str, Any]] = {
     "app_degradation": {
         "label": "Application Degradation",
@@ -48,6 +48,21 @@ ACTION_CATALOG: dict[str, dict[str, Any]] = {
         "description": "Makes the simulated DNS dependency fail at a controlled rate.",
         "reversible": True,
     },
+    "object_storage_throttle": {
+        "label": "Object Storage Throttling",
+        "description": "Adds synthetic throttling and stale reads to local object storage.",
+        "reversible": True,
+    },
+    "payment_failure": {
+        "label": "Payment Processor Failure",
+        "description": "Makes simulated payment authorization fail at a controlled rate.",
+        "reversible": True,
+    },
+    "queue_backlog": {
+        "label": "Queue Backlog",
+        "description": "Builds a synthetic backlog and delays the local consumer.",
+        "reversible": True,
+    },
     "safe_file_impact": {
         "label": "Safe File Impact",
         "description": "Renames generated test files and creates a simulated note.",
@@ -56,6 +71,16 @@ ACTION_CATALOG: dict[str, dict[str, Any]] = {
     "synthetic_edr_alert": {
         "label": "Synthetic EDR Alerts",
         "description": "Creates safe alerts without executing malicious behavior.",
+        "reversible": True,
+    },
+    "telemetry_gap": {
+        "label": "Observability Gap",
+        "description": "Delays or drops simulated telemetry without hiding real activity.",
+        "reversible": True,
+    },
+    "third_party_degradation": {
+        "label": "Third-Party API Degradation",
+        "description": "Adds controlled vendor API failures and rate-limit responses.",
         "reversible": True,
     },
 }
@@ -68,6 +93,15 @@ DEFAULT_CONDITIONS = {
     "backup_delay": False,
     "build_blocked": False,
     "file_impact": False,
+    "object_storage_throttle_rate": 0.0,
+    "payment_failure_rate": 0.0,
+    "queue_backlog_depth": 0,
+    "queue_consumer_delay_ms": 0,
+    "stale_read_rate": 0.0,
+    "telemetry_delay_seconds": 0,
+    "telemetry_gap_rate": 0.0,
+    "third_party_error_rate": 0.0,
+    "third_party_retry_after_seconds": 0,
 }
 
 
@@ -82,21 +116,33 @@ def render_target_environment(root: Path, exercise: Exercise) -> None:
         services:
           livefire-target:
             build: ./app
+            user: "${{LIVEFIRE_RUNTIME_UID:-1000}}:${{LIVEFIRE_RUNTIME_GID:-1000}}"
             ports:
-              - "127.0.0.1:8088:8088"
+              - "127.0.0.1:${{LIVEFIRE_TARGET_HOST_PORT:-8088}}:8088"
             volumes:
               - ../artifacts:/artifacts
               - ../chaos/state:/chaos_state
             environment:
               - LIVEFIRE_APP_NAME=LiveFireTTX Target
               - LIVEFIRE_STATE_DIR=/chaos_state
+            healthcheck:
+              test:
+                - CMD
+                - python
+                - -c
+                - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8088/health')"
+              interval: 3s
+              timeout: 2s
+              retries: 15
 
           livefire-chaos:
             build: ../chaos
+            user: "${{LIVEFIRE_RUNTIME_UID:-1000}}:${{LIVEFIRE_RUNTIME_GID:-1000}}"
             depends_on:
-              - livefire-target
+              livefire-target:
+                condition: service_healthy
             ports:
-              - "127.0.0.1:8090:8090"
+              - "127.0.0.1:${{LIVEFIRE_CONTROL_HOST_PORT:-8090}}:8090"
             volumes:
               - ../artifacts:/artifacts
               - ../chaos/state:/chaos_state
@@ -110,7 +156,7 @@ def render_target_environment(root: Path, exercise: Exercise) -> None:
                 - CMD
                 - python
                 - -c
-                - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health')"
+                - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/ready')"
               interval: 5s
               timeout: 2s
               retries: 10
@@ -123,8 +169,8 @@ def render_target_environment(root: Path, exercise: Exercise) -> None:
             """
             FROM python:3.12-slim
             WORKDIR /app
+            RUN pip install --no-cache-dir fastapi==0.128.8 starlette==0.49.3 uvicorn==0.39.0 pydantic==2.13.4
             COPY target_app.py /app/target_app.py
-            RUN pip install --no-cache-dir fastapi==0.115.6 uvicorn==0.34.0
             CMD ["uvicorn", "target_app:app", "--host", "0.0.0.0", "--port", "8088"]
             """
         )
@@ -139,6 +185,9 @@ def render_target_environment(root: Path, exercise: Exercise) -> None:
     ).replace(
         "__EXERCISE_ID__",
         repr(exercise.id),
+    ).replace(
+        "__DEPENDENCY_MAP__",
+        repr(SCENARIO_LIBRARY[exercise.scenario_type]["dependencies"]),
     )
     (root / "target" / "app" / "target_app.py").write_text(target_app)
 
@@ -148,9 +197,11 @@ def render_target_environment(root: Path, exercise: Exercise) -> None:
             """\
             #!/usr/bin/env bash
             set -euo pipefail
-            docker compose up -d --build
-            echo 'Target: http://127.0.0.1:8088'
-            echo 'Guarded chaos API: http://127.0.0.1:8090/docs'
+            export LIVEFIRE_RUNTIME_UID="${LIVEFIRE_RUNTIME_UID:-$(id -u)}"
+            export LIVEFIRE_RUNTIME_GID="${LIVEFIRE_RUNTIME_GID:-$(id -g)}"
+            docker compose up -d --build --wait
+            echo "Target: http://127.0.0.1:${LIVEFIRE_TARGET_HOST_PORT:-8088}"
+            echo "Guarded chaos API: http://127.0.0.1:${LIVEFIRE_CONTROL_HOST_PORT:-8090}/docs"
             """
         ),
     )
@@ -160,9 +211,11 @@ def render_target_environment(root: Path, exercise: Exercise) -> None:
             """\
             #!/usr/bin/env bash
             set -euo pipefail
-            curl --fail --silent http://127.0.0.1:8088/health
+            target_port="${LIVEFIRE_TARGET_HOST_PORT:-8088}"
+            control_port="${LIVEFIRE_CONTROL_HOST_PORT:-8090}"
+            curl --fail --silent "http://127.0.0.1:${target_port}/health"
             echo
-            curl --fail --silent http://127.0.0.1:8090/health
+            curl --fail --silent "http://127.0.0.1:${control_port}/ready"
             echo
             """
         ),
@@ -201,6 +254,9 @@ def render_chaos_environment(
     replacements = {
         "__ALLOWED_ACTIONS__": repr(allowed_actions),
         "__DEFAULT_PLAYBOOKS__": repr(default_playbooks),
+        "__DEPENDENCY_MAP__": repr(
+            SCENARIO_LIBRARY[exercise.scenario_type]["dependencies"]
+        ),
         "__EXERCISE_ID__": exercise.id,
     }
     engine = _load_template("chaos_engine.py.tmpl", replacements)
@@ -214,8 +270,8 @@ def render_chaos_environment(
             """
             FROM python:3.12-slim
             WORKDIR /app
+            RUN pip install --no-cache-dir fastapi==0.128.8 starlette==0.49.3 uvicorn==0.39.0 pydantic==2.13.4
             COPY engine.py server.py /app/
-            RUN pip install --no-cache-dir fastapi==0.115.6 uvicorn==0.34.0
             CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8090"]
             """
         )
@@ -258,6 +314,9 @@ def render_chaos_environment(
         "available_actions": [
             {"id": action, **ACTION_CATALOG[action]}
             for action in allowed_actions
+        ],
+        "dependency_map": SCENARIO_LIBRARY[exercise.scenario_type][
+            "dependencies"
         ],
     }
     (root / "chaos" / "chaos-plan.yml").write_text(
@@ -312,7 +371,7 @@ def _default_state(
     playbooks: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "control_version": CONTROL_VERSION,
         "revision": 0,
         "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -335,7 +394,12 @@ def _default_playbooks(
         "app_degradation": "ramp",
         "auth_failure": "burst",
         "dns_failure": "flap",
+        "object_storage_throttle": "jitter",
+        "payment_failure": "burst",
+        "queue_backlog": "ramp",
         "synthetic_edr_alert": "jitter",
+        "telemetry_gap": "flap",
+        "third_party_degradation": "burst",
     }
     stages = []
     for index, action in enumerate(allowed_actions):
@@ -352,8 +416,9 @@ def _default_playbooks(
                 "depends_on": [],
             }
         )
-    playbook = {
-        "id": "scenario_cascade",
+    playbook_id = "scenario_cascade"
+    playbook: dict[str, Any] = {
+        "id": playbook_id,
         "name": f"{exercise.name} Scenario Cascade",
         "description": (
             "A deterministic, overlapping fault sequence generated for this "
@@ -367,13 +432,13 @@ def _default_playbooks(
         },
         "stages": stages,
     }
-    return {playbook["id"]: playbook}
+    return {playbook_id: playbook}
 
 
 def _target_app_source() -> str:
     return dedent(
         r'''
-        from datetime import datetime, timezone
+        from datetime import datetime, timedelta, timezone
         from pathlib import Path
         import json
         import os
@@ -381,15 +446,27 @@ def _target_app_source() -> str:
         import time
 
         from fastapi import FastAPI, HTTPException
+        from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 
         app = FastAPI(title="LiveFireTTX Target")
+        app.add_middleware(
+            TrustedHostMiddleware,
+            allowed_hosts=[
+                "127.0.0.1",
+                "localhost",
+                "[::1]",
+                "livefire-target",
+                "testserver",
+            ],
+        )
         STATE_PATH = (
             Path(os.environ.get("LIVEFIRE_STATE_DIR", "/chaos_state")) / "state.json"
         )
         APP_NAME = __BUSINESS_SYSTEM__
         EXERCISE_NAME = __EXERCISE_NAME__
         EXERCISE_ID = __EXERCISE_ID__
+        DEPENDENCY_MAP = __DEPENDENCY_MAP__
         DEFAULT_CONDITIONS = {
             "latency_ms": 0,
             "error_rate": 0.0,
@@ -399,6 +476,15 @@ def _target_app_source() -> str:
             "backup_delay": False,
             "build_blocked": False,
             "file_impact": False,
+            "object_storage_throttle_rate": 0.0,
+            "payment_failure_rate": 0.0,
+            "queue_backlog_depth": 0,
+            "queue_consumer_delay_ms": 0,
+            "stale_read_rate": 0.0,
+            "telemetry_delay_seconds": 0,
+            "telemetry_gap_rate": 0.0,
+            "third_party_error_rate": 0.0,
+            "third_party_retry_after_seconds": 0,
         }
 
 
@@ -515,6 +601,133 @@ def _target_app_source() -> str:
             current = conditions()
             maybe_fail(current["dns_failure_rate"], "Synthetic DNS resolution failure")
             return {"resolved": True, "provider": "simulated"}
+
+
+        @app.get("/dependencies")
+        def dependency_map():
+            current = conditions()
+            condition_fields = {
+                "payment": ("payment_failure_rate",),
+                "queue": ("queue_backlog_depth", "queue_consumer_delay_ms"),
+                "storage": ("object_storage_throttle_rate", "stale_read_rate"),
+                "third_party": (
+                    "third_party_error_rate",
+                    "third_party_retry_after_seconds",
+                ),
+                "observability": (
+                    "telemetry_delay_seconds",
+                    "telemetry_gap_rate",
+                ),
+                "identity": ("auth_failure_rate",),
+                "backup": ("backup_delay",),
+                "build": ("build_blocked",),
+                "database": ("data_integrity",),
+            }
+            dependencies = []
+            for dependency in DEPENDENCY_MAP:
+                fields = condition_fields.get(dependency["type"], ())
+                degraded = any(current.get(field) for field in fields)
+                dependencies.append(
+                    {
+                        **dependency,
+                        "status": "degraded" if degraded else "healthy",
+                        "conditions": {
+                            field: current.get(field)
+                            for field in fields
+                        },
+                    }
+                )
+            return {
+                "exercise_id": EXERCISE_ID,
+                "application": APP_NAME,
+                "dependencies": dependencies,
+                "simulated": True,
+            }
+
+
+        @app.post("/payments/charge")
+        def charge_payment():
+            current = conditions()
+            maybe_fail(
+                current["payment_failure_rate"],
+                "Synthetic payment processor decline",
+            )
+            return {
+                "authorized": True,
+                "processor": "LiveFire simulated payments",
+                "simulated": True,
+            }
+
+
+        @app.get("/queue/status")
+        def queue_status():
+            current = conditions()
+            return {
+                "backlog_depth": current["queue_backlog_depth"],
+                "consumer_delay_ms": current["queue_consumer_delay_ms"],
+                "consumer_status": (
+                    "delayed"
+                    if current["queue_consumer_delay_ms"]
+                    else "current"
+                ),
+                "simulated": True,
+            }
+
+
+        @app.get("/storage/objects/{object_key}")
+        def storage_object(object_key: str):
+            current = conditions()
+            maybe_fail(
+                current["object_storage_throttle_rate"],
+                "Synthetic object storage throttle",
+            )
+            stale = bool(
+                current["stale_read_rate"]
+                and random.random() < float(current["stale_read_rate"])
+            )
+            return {
+                "key": object_key,
+                "version": "previous" if stale else "current",
+                "stale": stale,
+                "simulated": True,
+            }
+
+
+        @app.get("/dependencies/vendor")
+        def vendor_dependency():
+            current = conditions()
+            maybe_fail(
+                current["third_party_error_rate"],
+                "Synthetic third-party API failure",
+            )
+            return {
+                "available": True,
+                "retry_after_seconds": current[
+                    "third_party_retry_after_seconds"
+                ],
+                "provider": "simulated",
+            }
+
+
+        @app.get("/observability/metrics")
+        def observability_metrics():
+            current = conditions()
+            maybe_fail(
+                current["telemetry_gap_rate"],
+                "Synthetic telemetry sample unavailable",
+            )
+            observed_at = datetime.now(timezone.utc) - timedelta(
+                seconds=current["telemetry_delay_seconds"]
+            )
+            return {
+                "observed_at": observed_at.isoformat(),
+                "delay_seconds": current["telemetry_delay_seconds"],
+                "metrics": {
+                    "requests_per_minute": 120,
+                    "error_rate": current["error_rate"],
+                },
+                "simulated": True,
+            }
 
 
         @app.get("/backups/status")

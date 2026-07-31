@@ -15,6 +15,24 @@ from app.services.generator import create_exercise_from_request
 
 
 class GeneratedPackageTests(TestCase):
+    def test_empty_participant_list_uses_scenario_roles(self) -> None:
+        with TemporaryDirectory() as temporary:
+            with patch(
+                "app.services.generator.GENERATED_ROOT",
+                Path(temporary),
+            ):
+                exercise, _ = create_exercise_from_request(
+                    ExerciseCreate(
+                        name="Role defaults",
+                        scenario_type="dependency_cascade",
+                        participants=[],
+                    )
+                )
+        self.assertEqual(
+            SCENARIO_LIBRARY["dependency_cascade"]["recommended_roles"],
+            exercise.participants,
+        )
+
     def test_every_scenario_generates_runnable_chaos_controls(self) -> None:
         with TemporaryDirectory() as temporary:
             generated_root = Path(temporary)
@@ -50,16 +68,42 @@ class GeneratedPackageTests(TestCase):
                             {"livefire-target", "livefire-chaos"},
                             set(compose_config["services"]),
                         )
-                        self.assertIn("127.0.0.1:8088:8088", compose)
-                        self.assertIn("127.0.0.1:8090:8090", compose)
+                        self.assertEqual(
+                            "service_healthy",
+                            compose_config["services"]["livefire-chaos"][
+                                "depends_on"
+                            ]["livefire-target"]["condition"],
+                        )
+                        self.assertIn(
+                            "127.0.0.1:${LIVEFIRE_TARGET_HOST_PORT:-8088}:8088",
+                            compose,
+                        )
+                        self.assertIn(
+                            "127.0.0.1:${LIVEFIRE_CONTROL_HOST_PORT:-8090}:8090",
+                            compose,
+                        )
+                        self.assertIn(
+                            "${LIVEFIRE_RUNTIME_UID:-1000}:${LIVEFIRE_RUNTIME_GID:-1000}",
+                            compose,
+                        )
                         self.assertIn(
                             "LIVEFIRE_TARGET_URL=http://livefire-target:8088",
                             compose,
                         )
+                        self.assertIn(
+                            "pydantic==2.13.4",
+                            (
+                                package / "target" / "app" / "Dockerfile"
+                            ).read_text(),
+                        )
+                        self.assertIn(
+                            "pydantic==2.13.4",
+                            (chaos_root / "Dockerfile").read_text(),
+                        )
                         control = json.loads(
                             (chaos_root / "control.json").read_text()
                         )
-                        self.assertEqual("0.4.0", control["version"])
+                        self.assertEqual("1.0.0", control["version"])
                         self.assertEqual(exercise.id, control["exercise_id"])
                         playbook_path = (
                             chaos_root / "playbooks" / "scenario_cascade.yml"
@@ -70,6 +114,15 @@ class GeneratedPackageTests(TestCase):
                         self.assertEqual(
                             min(4, len(playbook["stages"]) * 2),
                             playbook["safety"]["max_severity_points"],
+                        )
+                        self.assertTrue(
+                            (package / "participants" / "index.yml").is_file()
+                        )
+                        self.assertTrue(
+                            list((package / "participants" / "roles").glob("*.md"))
+                        )
+                        self.assertTrue(
+                            (package / "sample_data" / "dependencies.json").is_file()
                         )
 
                         action_ids = [
@@ -138,6 +191,93 @@ class GeneratedPackageTests(TestCase):
                             list((package / "artifacts").rglob("*.locked"))
                         )
 
+    def test_dependency_cascade_exposes_reversible_dependency_impact(self) -> None:
+        with TemporaryDirectory() as temporary:
+            with patch(
+                "app.services.generator.GENERATED_ROOT",
+                Path(temporary),
+            ):
+                exercise, _ = create_exercise_from_request(
+                    ExerciseCreate(
+                        name="Dependency cascade",
+                        scenario_type="dependency_cascade",
+                    )
+                )
+                package = Path(exercise.package_path)
+                chaos_root = package / "chaos"
+                for action in [
+                    "payment_failure",
+                    "queue_backlog",
+                    "object_storage_throttle",
+                    "third_party_degradation",
+                    "telemetry_gap",
+                ]:
+                    self.run_cli(
+                        chaos_root,
+                        "run",
+                        action,
+                        "--intensity",
+                        "low",
+                        "--duration",
+                        "60",
+                        "--skip-preflight",
+                    )
+
+                environment = {
+                    **os.environ,
+                    "LIVEFIRE_STATE_DIR": str(chaos_root / "state"),
+                }
+                script = """
+import json
+import target_app
+
+print(json.dumps({
+    "routes": sorted(route.path for route in target_app.app.routes),
+    "dependencies": target_app.dependency_map(),
+    "queue": target_app.queue_status(),
+}))
+"""
+                process = subprocess.run(
+                    [sys.executable, "-c", script],
+                    cwd=package / "target" / "app",
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(0, process.returncode, process.stderr)
+                result = json.loads(process.stdout)
+                self.assertIn("/payments/charge", result["routes"])
+                self.assertIn("/queue/status", result["routes"])
+                self.assertIn("/storage/objects/{object_key}", result["routes"])
+                self.assertIn("/dependencies/vendor", result["routes"])
+                self.assertIn("/observability/metrics", result["routes"])
+                self.assertEqual(
+                    {"degraded"},
+                    {
+                        item["status"]
+                        for item in result["dependencies"]["dependencies"]
+                    },
+                )
+                self.assertEqual(300, result["queue"]["backlog_depth"])
+                self.run_cli(chaos_root, "reset")
+                reset_process = subprocess.run(
+                    [sys.executable, "-c", script],
+                    cwd=package / "target" / "app",
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                reset_result = json.loads(reset_process.stdout)
+                self.assertEqual(
+                    {"healthy"},
+                    {
+                        item["status"]
+                        for item in reset_result["dependencies"]["dependencies"]
+                    },
+                )
+
     def test_scenario_allowlist_rejects_unavailable_action(self) -> None:
         with TemporaryDirectory() as temporary:
             with patch(
@@ -189,6 +329,7 @@ class GeneratedPackageTests(TestCase):
                 script = """
 import json
 import server
+from fastapi.testclient import TestClient
 
 healthy = {
     "reachable": True,
@@ -198,6 +339,18 @@ healthy = {
     "conditions": {"latency_ms": 0, "error_rate": 0.0},
 }
 server.target_snapshot = lambda: healthy
+with TestClient(server.app) as client:
+    cross_origin_status = client.post(
+        "/reset",
+        headers={
+            "origin": "https://livefire.example",
+            "sec-fetch-site": "cross-site",
+        },
+    ).status_code
+    untrusted_host_status = client.get(
+        "/health",
+        headers={"host": "livefire.example"},
+    ).status_code
 paths = sorted(route.path for route in server.app.routes)
 applied = server.apply_action(
     "app_degradation",
@@ -235,6 +388,8 @@ print(json.dumps({
     "violation": violation,
     "stopped": stopped,
     "final_state": final_state,
+    "cross_origin_status": cross_origin_status,
+    "untrusted_host_status": untrusted_host_status,
 }))
 """
                 process = subprocess.run(
@@ -252,9 +407,12 @@ print(json.dumps({
                 self.assertEqual(0, process.returncode, process.stderr)
                 result = json.loads(process.stdout)
                 self.assertIn("/actions/{action}", result["paths"])
+                self.assertIn("/ready", result["paths"])
                 self.assertIn("/state", result["paths"])
                 self.assertIn("/runs", result["paths"])
                 self.assertIn("/emergency-stop", result["paths"])
+                self.assertEqual(403, result["cross_origin_status"])
+                self.assertEqual(400, result["untrusted_host_status"])
                 self.assertTrue(result["applied"]["ok"])
                 self.assertEqual(
                     3000,
