@@ -1,6 +1,6 @@
 # LiveFireTTX Architecture
 
-LiveFireTTX is intentionally local-first. The current MVP uses a FastAPI backend, Jinja2 templates, SQLite persistence, and generated Docker Compose labs.
+LiveFireTTX is intentionally local-first. Version 0.2 uses a FastAPI facilitator app, Jinja2 templates, SQLite persistence, and generated Docker Compose labs with a separate safe chaos control service.
 
 ## Core flow
 
@@ -11,7 +11,9 @@ Facilitator input
   -> Exercise + inject options
   -> Generated package
   -> Facilitator console
-  -> Triggered injects / chaos actions
+  -> Triggered injects / safe chaos controller
+  -> Shared simulation state
+  -> Observable target behavior
   -> Run log
   -> After-action report template
 ```
@@ -28,28 +30,42 @@ The web form captures scenario type, business system, difficulty, participants, 
 
 ### Exercise Generator
 
-`app/services/generator.py` creates:
+`app/services/generator.py` and `app/services/lab_renderer.py` create:
 
 - `exercise.yml`
 - `facilitator_guide.md`
 - `participant_brief.md`
 - `target/` Docker Compose lab
-- `chaos/` safe simulation scripts
+- `chaos/` scenario-scoped API, CLI, state engine, and artifacts
 - `artifacts/` exercise artifacts
 - `reports/after_action_template.md`
 - `cleanup/destroy.sh`
 
 ### Facilitator Console
 
-The console groups injects by stage and lets the exercise leader manually trigger each inject. Triggered actions are stored in SQLite and shown in the run log.
+The console groups injects by stage and lets the exercise leader manually trigger each inject. Chaos actions support low, medium, and high intensity, repeat execution, and full reset. Trigger counts and action results are stored in SQLite and shown in the run log.
 
 ### Target Environment
 
-The target environment is generated per exercise. The local MVP generates a small FastAPI target app with health and order endpoints.
+The target environment is generated per exercise. It exposes safe business and dependency endpoints that react to shared simulation conditions such as latency, application errors, authentication failures, DNS failures, backup delays, blocked builds, and seeded-record integrity issues.
 
-### Chaos Environment
+### Chaos Control Plane
 
-The chaos environment is generated separately from the target environment. Chaos scripts create safe synthetic events and local state changes.
+The chaos environment is generated separately from the target environment and runs on `127.0.0.1:8090`. Its API and CLI share an allowlisted state engine. Each generated exercise contains only the actions relevant to its scenario. State updates use file locking and atomic replacement, while synthetic artifacts are retained for exercise evidence.
+
+```text
+Facilitator Console or Chaos API
+  -> Scenario action allowlist
+  -> Intensity profile
+  -> Locked state update
+  -> Synthetic artifact
+  -> Target reads shared state
+  -> Observable simulated impact
+```
+
+### Runtime Safety Boundary
+
+`app/services/runtime.py` validates that locally executed scripts remain inside the generated `chaos/` directory, enforces the generated intensity allowlist, applies timeouts, and records failures.
 
 ## Future renderers
 

@@ -3,13 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LiveFireTTX</title>
+  <title>{% block title %}LiveFireTTX{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
   <header>
     <div>
-      <h1><a href="/">LiveFireTTX</a></h1>
+      <div class="brand-row">
+        <h1><a href="/">LiveFireTTX</a></h1>
+        <span class="version">v{{ app_version }}</span>
+      </div>
       <p>Live-fire tabletop exercise builder and chaos facilitator console</p>
     </div>
     <nav><a class="button" href="/new">New Exercise</a></nav>

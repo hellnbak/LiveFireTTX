@@ -1,17 +1,18 @@
 # LiveFireTTX
 
-LiveFireTTX is a local-first MVP for building and running live-fire tabletop exercises. It helps facilitators generate a scenario-specific target environment, a safe chaos environment, inject options, exercise artifacts, and a web console where the tabletop leader can manually trigger injects during the exercise.
+LiveFireTTX is a local-first application for building and running live-fire tabletop exercises. It helps facilitators generate a scenario-specific target environment, a safe chaos control plane, inject options, exercise artifacts, and a web console where the tabletop leader can steer the exercise.
 
-> **Status:** MVP / prototype. Use only in controlled lab environments.
+> **Status:** v0.2 prototype. Use only in controlled lab environments.
 
 ## What it does
 
 - Creates tabletop and live-fire exercises from guided scenario inputs
 - Generates a structured exercise package for each run
 - Builds a local Docker Compose target environment
-- Builds safe local chaos scripts for controlled simulation
+- Builds a scenario-scoped chaos API and CLI for controlled simulation
 - Provides a facilitator inject console
-- Lets the exercise leader manually trigger narrative injects and chaos actions
+- Lets the exercise leader choose chaos intensity, repeat actions, and reset state
+- Makes the generated target respond to latency, error, auth, DNS, backup, build, and data-integrity conditions
 - Supports multiple inject/chaos options per exercise stage
 - Logs facilitator actions, inject triggers, and manual notes
 - Generates after-action report templates
@@ -82,6 +83,22 @@ Open the mock target app:
 http://127.0.0.1:8088
 ```
 
+Open the safe chaos control API:
+
+```text
+http://127.0.0.1:8090/docs
+```
+
+The same scenario-scoped controls are available from the generated package:
+
+```bash
+cd generated/exercises/<exercise-id>/chaos
+python3 chaos_cli.py list
+python3 chaos_cli.py run app_degradation --intensity medium
+python3 chaos_cli.py state
+python3 chaos_cli.py reset
+```
+
 Cleanup:
 
 ```bash
@@ -95,7 +112,9 @@ cd generated/exercises/<exercise-id>/cleanup
 app/
   main.py                  # FastAPI app and routes
   models.py                # Scenario library, dataclasses, SQLite persistence
-  services/generator.py    # Exercise package, target, and chaos generation
+  services/generator.py    # Exercise and inject generation
+  services/lab_renderer.py # Target and safe chaos control-plane rendering
+  services/runtime.py      # Validated local chaos execution
   templates/               # Jinja2 UI templates and CSS
 docs/
   ARCHITECTURE.md
@@ -117,7 +136,7 @@ requirements.txt
 Scenario Builder
   -> Scenario Definition
   -> Target Environment Generator
-  -> Chaos Environment Generator
+  -> Safe Chaos API / CLI
   -> Facilitator Inject Console
   -> Run Log
   -> After-Action Report Template
