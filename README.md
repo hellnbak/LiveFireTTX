@@ -5,7 +5,7 @@ tabletop exercises. It generates a scenario-specific target, a guarded chaos
 control plane, facilitator injects, participant materials, sample data, and an
 evidence-ready command center.
 
-> **Status:** v1.3.0. Run only in controlled lab environments.
+> **Status:** v1.4.0. Run only in controlled lab environments.
 
 ## Highlights
 
@@ -30,7 +30,9 @@ evidence-ready command center.
 - Opt-in shared deployment mode with authenticated administrator, facilitator,
   evaluator, and participant permissions
 - Safe watermarked artifact injects
-- Objective scoring, run comparison, after-action reports, and ZIP evidence export
+- Objective scoring, run comparison, after-action reports, and signed ZIP evidence export
+- Retained evidence history with offline integrity verification and bounded cleanup
+- Chromium accessibility, responsive-layout, and end-to-end workflow regression gates
 - Versioned SQLite migrations plus local backup and restore tooling
 - Installable Python package, application container, CI, CodeQL, and Docker
   release smoke testing
@@ -113,7 +115,7 @@ localhost.
 6. Pause or resume the exercise as needed; scheduled narratives freeze with the
    clock and resume from the same exercise time.
 7. Stop active runs, complete the exercise, assess objectives, assign corrective
-   actions in the Evaluator Workspace, and download the AAR/IP evidence package.
+   actions in the Evaluator Workspace, and create a signed AAR/IP evidence package.
 8. Clean up:
 
    ```bash
@@ -182,6 +184,9 @@ runtime environment. See
 | `LIVEFIRE_SECURE_COOKIES` | Shared-mode value | Require HTTPS-only session cookies |
 | `LIVEFIRE_BOOTSTRAP_ADMIN_USERNAME` | `admin` | First shared-mode administrator username |
 | `LIVEFIRE_BOOTSTRAP_ADMIN_PASSWORD` | unset | First shared-mode administrator password; 12–1024 characters |
+| `LIVEFIRE_EVIDENCE_SIGNING_KEY_PATH` | `<data-root>/evidence-signing.key` | Owner-only local HMAC signing key |
+| `LIVEFIRE_EVIDENCE_RETENTION_DAYS` | `365` | Maximum retained export age, 1–36,500 days |
+| `LIVEFIRE_EVIDENCE_RETENTION_COUNT` | `25` | Maximum retained exports per exercise, 1–10,000 |
 
 The control URL must remain on loopback unless the container-only
 `host.docker.internal` bridge is explicitly enabled. See
@@ -202,10 +207,28 @@ Stop the application before restoring. Archives contain the SQLite snapshot,
 generated exercise packages, and a versioned manifest. Active authentication
 sessions are intentionally excluded.
 
+## Signed Evidence
+
+The first evidence export creates an owner-only installation key at
+`~/.livefirettx/evidence-signing.key`. Each evidence ZIP contains a signed
+manifest plus SHA-256 digests and byte counts for every report, CSV, and state
+file. Verify an archive on the originating installation with:
+
+```bash
+livefirettx verify-evidence <exercise-evidence.zip>
+```
+
+For independent verification, transfer the key through a separate secure
+channel, set its permissions to owner-only, and pass `--key-file`. The signing
+key is intentionally absent from evidence archives and LiveFireTTX backups.
+Retained exports remain inside each generated exercise package and are pruned by
+the configured age and count limits. See [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
+
 ## Development and Release Gates
 
 ```bash
 pip install -r requirements-dev.txt
+python -m playwright install chromium
 make test
 make release-check
 make app-container-smoke
@@ -213,7 +236,8 @@ make docker-smoke
 ```
 
 `make release-check` runs linting, Python compilation, mypy, service coverage,
-application smoke checks, dependency and secret scanning, and package builds.
+application smoke checks, dependency and secret scanning, a real Chromium UI
+journey, accessibility and responsive-layout checks, and package builds.
 GitHub Actions repeats these checks on Python 3.11, 3.12, and 3.13. The Docker
 gate generates a critical
 dependency exercise, deploys both generated services, validates them, applies
@@ -233,6 +257,8 @@ Review [`docs/SAFETY.md`](docs/SAFETY.md) and
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)
+- [`docs/EVIDENCE.md`](docs/EVIDENCE.md)
+- [`docs/ACCESSIBILITY.md`](docs/ACCESSIBILITY.md)
 - [`docs/SCENARIO_PACKS.md`](docs/SCENARIO_PACKS.md)
 - [`docs/SHARED_DEPLOYMENTS.md`](docs/SHARED_DEPLOYMENTS.md)
 - [`docs/ROADMAP.md`](docs/ROADMAP.md)

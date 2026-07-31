@@ -1,6 +1,6 @@
 # LiveFireTTX Architecture
 
-LiveFireTTX v1.3 is intentionally local-first. The facilitator application uses
+LiveFireTTX v1.4 is intentionally local-first. The facilitator application uses
 FastAPI, Jinja2, SQLite, and filesystem-backed generated packages. Every
 exercise receives a separate Docker Compose target and chaos controller bound
 to localhost.
@@ -105,6 +105,23 @@ Impact comparison includes application, access, payment, queue, storage,
 third-party, and telemetry signals. Facilitators—not the application—determine
 whether objectives were achieved.
 
+### Evidence Trust and Retention
+
+`app/services/evidence.py` builds evidence manifest schema 4. Each archive file
+has a declared byte count and SHA-256 digest. The exact manifest bytes are
+authenticated by a detached HMAC-SHA256 signature whose key ID identifies the
+originating installation without exposing the key.
+
+Signing keys are generated outside exercise packages with owner-only
+permissions. Archive verification rejects unsafe names, duplicate or undeclared
+members, symlinks, size-limit violations, digest mismatches, key mismatches, and
+signature mismatches. The CLI provides offline verification.
+
+Exports are retained under a path-contained per-exercise reports directory.
+Cleanup considers only strict application-generated filenames and applies both
+configured age and count limits. Retained downloads are verified before they
+are served.
+
 ### Facilitator Operations
 
 SQLite schema version 4 persists the exercise lifecycle clock, accumulated
@@ -186,6 +203,7 @@ operator-selected output paths.
 - `.github/workflows/ci.yml` validates Python 3.11–3.13 and generated packages.
 - `.github/workflows/codeql.yml` performs scheduled and pull-request analysis.
 - `.github/workflows/release.yml` builds artifacts only after release gates pass.
+- `scripts/e2e_ui.py` runs Chromium accessibility, responsive, and workflow checks.
 - `scripts/docker_release_smoke.sh` exercises generated target deployment,
   preflight, bounded dependency injection, reset, and teardown.
 

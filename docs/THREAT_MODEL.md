@@ -7,6 +7,7 @@
 - Synthetic artifacts, run observations, and evidence archives
 - Local SQLite database and backups
 - Scenario packs, organization profiles, account hashes, and session records
+- Evidence signing key and retained signed evidence history
 
 ## Trust Boundaries
 
@@ -43,7 +44,23 @@ compatibility checks, and versioned manifests.
 
 Controls: visible simulation watermarks, immutable playbook snapshots and seeds,
 explicit facilitator ratings, provisional score labeling, retained reset/abort
-events, and formula-safe CSV export.
+events, formula-safe CSV export, per-file SHA-256 digests, and detached manifest
+authentication with an installation-specific key.
+
+The HMAC signature establishes integrity only for a verifier that securely
+possesses the same key. It is not participant identity proof or public-key legal
+non-repudiation.
+
+### Evidence Archive Tampering or Retention Escape
+
+Controls: owner-only random signing key stored outside generated packages,
+constant-time HMAC verification, bounded compressed and expanded sizes, member
+count limits, safe member names, duplicate and symlink rejection, exact declared
+file matching, digest and byte-count checks, strict retained-export filenames,
+exercise-derived path containment, and verification before retained download.
+
+The key is intentionally excluded from archives and backups. Operators must
+preserve it separately for disaster recovery and independent verification.
 
 ### Unattended Scheduled Actions
 
@@ -101,3 +118,4 @@ unless shared mode is enabled.
 - Public internet-facing or multi-tenant deployment
 - Malicious code execution or offensive security tooling
 - Cloud account authorization and organization tenancy
+- Public-key evidence notarization or legal non-repudiation

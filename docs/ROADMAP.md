@@ -86,17 +86,23 @@
 - Versioned local scenario library and reusable organization profiles
 - Authenticated role permissions for networked or shared deployments
 
-## Next: v1.4 Evidence and Experience
+## v1.4 Evidence and Experience
 
 - Signed evidence manifests and configurable retention
 - Browser-driven accessibility and end-to-end UI regression tests
+
+## Next: v1.5 Readiness and Rehearsal
+
+- Guided pre-exercise rehearsal with role, material, timing, and lab validation
+- Facilitator readiness dashboard with actionable blockers and launch criteria
+- Printable participant packets and facilitator run books
+- Exercise duplication with a clean runtime state and retained design provenance
 
 ## Future Cloud and Enterprise
 
 - AWS Terraform and Fault Injection Service renderers
 - Kubernetes / Helm and Azure Chaos Studio renderers
 - Slack, Teams, Jira, ServiceNow, SIEM, and EDR connectors
-- Multi-user authentication and organization workspaces
 - Shared versioned scenario library
 
 Cloud and enterprise work does not weaken the v1 local safety boundary.

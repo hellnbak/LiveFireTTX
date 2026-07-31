@@ -25,6 +25,13 @@ def _positive_int(name: str, default: int) -> int:
     return parsed
 
 
+def _bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    parsed = _positive_int(name, default)
+    if not minimum <= parsed <= maximum:
+        raise ValueError(f"{name} must be between {minimum} and {maximum}")
+    return parsed
+
+
 def _boolean(name: str, default: bool = False) -> bool:
     value = os.environ.get(name)
     if value is None:
@@ -73,6 +80,9 @@ class Settings:
     secure_cookies: bool
     bootstrap_admin_username: str
     bootstrap_admin_password: str | None
+    evidence_signing_key_path: Path
+    evidence_retention_days: int
+    evidence_retention_count: int
 
 
 def load_settings() -> Settings:
@@ -91,6 +101,10 @@ def load_settings() -> Settings:
     backup_root = _path_from_env(
         "LIVEFIRE_BACKUP_ROOT",
         data_root / "backups",
+    )
+    evidence_signing_key_path = _path_from_env(
+        "LIVEFIRE_EVIDENCE_SIGNING_KEY_PATH",
+        data_root / "evidence-signing.key",
     )
     raw_control_url = os.environ.get(
         "LIVEFIRE_CONTROL_URL",
@@ -168,6 +182,19 @@ def load_settings() -> Settings:
         secure_cookies=_boolean("LIVEFIRE_SECURE_COOKIES", shared_mode),
         bootstrap_admin_username=bootstrap_admin_username,
         bootstrap_admin_password=bootstrap_admin_password,
+        evidence_signing_key_path=evidence_signing_key_path,
+        evidence_retention_days=_bounded_int(
+            "LIVEFIRE_EVIDENCE_RETENTION_DAYS",
+            365,
+            1,
+            36500,
+        ),
+        evidence_retention_count=_bounded_int(
+            "LIVEFIRE_EVIDENCE_RETENTION_COUNT",
+            25,
+            1,
+            10000,
+        ),
     )
 
 

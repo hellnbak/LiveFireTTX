@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/static/style.css?v={{ app_version }}">
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
   <header>
     <div>
       <div class="brand-row">
@@ -18,7 +19,7 @@
     </div>
     {% set current_user = request.state.current_user if request is defined else none %}
     {% if current_user %}
-      <nav class="header-nav">
+      <nav class="header-nav" aria-label="Primary navigation">
         {% if current_user.can('design') %}<a class="button" href="/library">Design Library</a><a class="button" href="/new">New Exercise</a>{% endif %}
         {% if current_user.can('admin') and current_user.id != 'local' %}<a class="button" href="/admin/users">Users</a>{% endif %}
         {% if current_user.id != 'local' %}
@@ -28,6 +29,6 @@
       </nav>
     {% endif %}
   </header>
-  <main>{% block content %}{% endblock %}</main>
+  <main id="main-content" tabindex="-1">{% block content %}{% endblock %}</main>
 </body>
 </html>

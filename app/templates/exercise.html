@@ -20,6 +20,33 @@
   </div>
 </section>
 
+<section class="card wide evidence-trust">
+  <div class="row between">
+    <div>
+      <p class="eyebrow">Evidence Trust</p>
+      <h3>Signed &amp; Retained Exports</h3>
+      <p class="muted">Every ZIP includes a detached HMAC-SHA256 manifest signature plus a SHA-256 digest and byte count for every evidence file.</p>
+    </div>
+    <a class="button primary" href="/exercises/{{ exercise.id }}/reports/evidence.zip">Create Signed Export</a>
+  </div>
+  <div class="evidence-stats">
+    <span><strong>{{ evidence_exports.archives|length }}</strong> retained exports</span>
+    <span><strong>{{ evidence_exports.retention_count }}</strong> maximum exports</span>
+    <span><strong>{{ evidence_exports.retention_days }}</strong> retention days</span>
+    <span><strong>{{ evidence_exports.key_id or 'Pending' }}</strong> signing key ID</span>
+  </div>
+  <div class="evidence-history" aria-label="Retained evidence exports">
+    {% for archive in evidence_exports.archives[:8] %}
+      <div class="mini evidence-record">
+        <div><strong>{{ archive.created_at }}</strong><br><small>{{ archive.filename }} · {{ archive.size_bytes }} bytes</small></div>
+        <div class="actions"><span class="pill {{ 'healthy' if archive.valid else 'failed' }}">{{ 'Verified' if archive.valid else 'Unverified' }}</span><a class="button compact-button" href="/exercises/{{ exercise.id }}/reports/evidence/{{ archive.filename }}">Download</a></div>
+      </div>
+    {% else %}
+      <p class="muted">No retained evidence exports yet. The first export creates the installation signing key.</p>
+    {% endfor %}
+  </div>
+</section>
+
 <details class="card wide design-capture">
   <summary>Capture this design as a reusable scenario pack</summary>
   <p class="muted">Runtime status, exercise IDs, generated paths, evidence, and trigger history are excluded. The reusable design keeps defaults, MSEL injects, safe action references, and evaluator checkpoints.</p>
@@ -470,6 +497,7 @@
       <p class="muted">Drag stages into order, preview timing, and validate dependencies and safety budgets before saving.</p>
     </div>
     <form id="playbook-import-form" class="import-form">
+      <label class="sr-only" for="playbook-import-file">Playbook YAML file</label>
       <input id="playbook-import-file" type="file" accept=".yml,.yaml,text/yaml" required>
       <button class="button" type="submit" {{ 'disabled' if not control_status.get('reachable') else '' }}>Import YAML</button>
     </form>
@@ -501,8 +529,10 @@
           <details>
             <summary>Clone or restore</summary>
             <form class="clone-form" action="/exercises/{{ exercise.id }}/playbooks/{{ playbook.get('id') }}/clone" method="post">
-              <input name="new_playbook_id" placeholder="new_playbook_id" pattern="[a-z0-9][a-z0-9_-]{0,63}" required>
-              <input name="new_name" placeholder="New playbook name" maxlength="120" required>
+              <label class="sr-only" for="clone-id-{{ loop.index }}">New playbook ID</label>
+              <input id="clone-id-{{ loop.index }}" name="new_playbook_id" placeholder="new_playbook_id" pattern="[a-z0-9][a-z0-9_-]{0,63}" required>
+              <label class="sr-only" for="clone-name-{{ loop.index }}">New playbook name</label>
+              <input id="clone-name-{{ loop.index }}" name="new_name" placeholder="New playbook name" maxlength="120" required>
               <button class="button compact-button" type="submit">Clone Template</button>
             </form>
             {% if playbook.get('versions') %}

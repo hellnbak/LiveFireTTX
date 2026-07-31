@@ -13,6 +13,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-dev.txt
 pip install -e .
+python -m playwright install chromium
 uvicorn app.main:app --reload
 ```
 
@@ -25,3 +26,4 @@ uvicorn app.main:app --reload
 - Update docs when changing user-facing behavior.
 - Add tests for migrations, generated packages, safety boundaries, and routes.
 - Run `make release-check` before opening a pull request.
+- Use `make e2e` while iterating on templates, navigation, or responsive layout.

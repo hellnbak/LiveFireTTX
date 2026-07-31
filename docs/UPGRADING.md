@@ -1,5 +1,30 @@
 # Upgrading
 
+## From v1.3 to v1.4
+
+1. Stop the facilitator application and create a backup.
+2. Preserve the complete data root. v1.4 has no database migration and keeps
+   schema version 5.
+3. Install v1.4 with Python 3.11 or newer and start the application.
+4. The first evidence export creates
+   `<data-root>/evidence-signing.key`. Keep the file owner-only and on persistent
+   storage. Existing unsigned evidence ZIPs remain readable but cannot be
+   upgraded into signed historical exports without regenerating them from
+   retained exercise state.
+5. Set `LIVEFIRE_EVIDENCE_RETENTION_DAYS` and
+   `LIVEFIRE_EVIDENCE_RETENTION_COUNT` before export if the defaults of 365 days
+   and 25 exports per exercise do not match local policy.
+6. Create and verify a signed export:
+
+   ```bash
+   livefirettx verify-evidence <downloaded-evidence.zip>
+   ```
+
+7. Preserve the signing key separately from LiveFireTTX backups when old
+   evidence must remain verifiable after host restore.
+8. Development and release environments must install Chromium with
+   `python -m playwright install chromium` before `make release-check`.
+
 ## From v1.2 to v1.3
 
 1. Stop the facilitator application and create a backup.

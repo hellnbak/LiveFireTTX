@@ -142,4 +142,14 @@ class AuthenticationTests(TestCase):
                 "/exercises/ttx_123456789abc/objectives/0",
             ),
         )
+        self.assertEqual(
+            "evaluate",
+            required_capability(
+                "GET",
+                (
+                    "/exercises/ttx_123456789abc/reports/evidence/"
+                    "evidence-20260731T120000123456Z-1234abcd.zip"
+                ),
+            ),
+        )
         self.assertEqual("admin", required_capability("GET", "/admin/users"))

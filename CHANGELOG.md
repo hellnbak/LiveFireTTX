@@ -2,6 +2,47 @@
 
 All notable changes to LiveFireTTX are documented here.
 
+## 1.4.0 - 2026-07-31
+
+### Added
+
+- Signed evidence manifests using an installation-specific HMAC-SHA256 key and
+  detached `manifest.sig` metadata
+- SHA-256 digest and byte-count verification for every file declared by an
+  evidence manifest
+- `livefirettx verify-evidence` for offline verification with the originating
+  installation key or an explicitly supplied key file
+- Per-exercise retained evidence-export history with configurable age and count
+  limits and integrity status in command-center and evaluator views
+- Chromium end-to-end journeys covering exercise creation, evidence export,
+  facilitator, evaluator, participant, desktop, and mobile experiences
+- Browser accessibility checks for labels, landmarks, heading order, control
+  names, duplicate IDs, keyboard skip navigation, and responsive overflow
+
+### Changed
+
+- Evidence manifest schema advanced to version 4 and now rejects undeclared,
+  missing, modified, duplicated, oversized, symlinked, or unsafe archive entries
+- Evidence downloads are retained under their validated exercise package and
+  verified again before a retained archive is served
+- Release automation installs Chromium and includes browser regression testing
+  in the release gate
+- Development environments pin vulnerability-fixed packaging tools so local and
+  hosted dependency audits evaluate the same release toolchain
+- Core templates now declare document language, expose a keyboard skip link,
+  provide visible focus states, and honor reduced-motion preferences
+
+### Security
+
+- Signing keys are generated with operating-system randomness, stored outside
+  generated packages with owner-only permissions, and never embedded in evidence
+  archives or application backups
+- Retention cleanup can delete only application-generated filenames within the
+  path-contained per-exercise evidence directory
+- Archive verification is bounded by compressed size, expanded size, member
+  count, safe names, regular-file requirements, and constant-time signature
+  comparison
+
 ## 1.3.0 - 2026-07-31
 
 ### Added

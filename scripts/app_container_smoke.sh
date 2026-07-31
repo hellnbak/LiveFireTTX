@@ -86,4 +86,19 @@ with ZipFile(BytesIO(package)) as archive:
     if not required.issubset(archive.namelist()):
         raise SystemExit("Container-generated package is incomplete")
 print(json.dumps({"package_downloaded": True, "exercise_id": exercise_id}))
+
+with urllib.request.urlopen(
+    f"{base_url}/exercises/{exercise_id}/reports/evidence.zip",
+    timeout=10,
+) as response:
+    evidence = response.read()
+    key_id = response.headers["X-LiveFire-Evidence-Key-ID"]
+with ZipFile(BytesIO(evidence)) as archive:
+    manifest = json.loads(archive.read("manifest.json"))
+    if manifest.get("schema_version") != 4 or "manifest.sig" not in archive.namelist():
+        raise SystemExit("Container evidence package is not signed")
+print(json.dumps({"signed_evidence": True, "key_id": key_id}))
 PY
+
+docker exec "${container_name}" python -c \
+  'from pathlib import Path; import stat; p=Path("/data/evidence-signing.key"); assert p.is_file(); assert stat.S_IMODE(p.stat().st_mode) == 0o600'

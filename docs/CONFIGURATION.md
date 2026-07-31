@@ -21,6 +21,9 @@ LiveFireTTX reads configuration from environment variables at process startup.
 | `LIVEFIRE_SECURE_COOKIES` | Same as shared mode | Boolean requiring HTTPS-only session cookies |
 | `LIVEFIRE_BOOTSTRAP_ADMIN_USERNAME` | `admin` | Valid lowercase first-administrator username |
 | `LIVEFIRE_BOOTSTRAP_ADMIN_PASSWORD` | unset | First-administrator password, 12–1024 characters |
+| `LIVEFIRE_EVIDENCE_SIGNING_KEY_PATH` | `<data-root>/evidence-signing.key` | Resolved owner-only key path |
+| `LIVEFIRE_EVIDENCE_RETENTION_DAYS` | `365` | Integer from 1 through 36,500 |
+| `LIVEFIRE_EVIDENCE_RETENTION_COUNT` | `25` | Integer from 1 through 10,000 per exercise |
 
 Generated package deployment also accepts:
 
@@ -38,8 +41,8 @@ export LIVEFIRE_DATA_ROOT="$HOME/.livefirettx"
 uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-The three specific storage variables override paths derived from
-`LIVEFIRE_DATA_ROOT` when set.
+The specific database, generated-package, backup, and signing-key variables
+override paths derived from `LIVEFIRE_DATA_ROOT` when set.
 
 The scheduler only delivers narrative injects explicitly marked for automatic
 delivery. Pausing an exercise freezes elapsed exercise time and prevents new
@@ -54,6 +57,20 @@ manual-only mode with:
 ```bash
 LIVEFIRE_SCHEDULER_ENABLED=false docker compose up -d --build
 ```
+
+## Evidence Signing and Retention
+
+The first signed evidence export creates a random 32-byte key at
+`LIVEFIRE_EVIDENCE_SIGNING_KEY_PATH`. On POSIX systems the key must remain a
+regular, non-symlinked, owner-only file. The application refuses to sign or
+verify evidence when that key is missing after initial creation, malformed,
+oversized, symlinked, or readable by group or other users.
+
+The default path follows `LIVEFIRE_DATA_ROOT`; an explicit key path does not.
+Keep the key on persistent storage and copy it through a separate secure channel
+when evidence must be verified elsewhere. Application backups deliberately omit
+the signing key. Retained evidence ZIPs are stored under each generated package
+and pruned after export when either retention limit is exceeded.
 
 ## Shared Deployment
 

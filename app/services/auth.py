@@ -284,7 +284,10 @@ def required_capability(method: str, path: str) -> str | None:
         return "participate"
     evaluator_patterns = (
         r"/exercises/ttx_[a-f0-9]{12}/evaluate",
-        r"/exercises/ttx_[a-f0-9]{12}/reports/(?:after-action\.md|evidence\.zip)",
+        (
+            r"/exercises/ttx_[a-f0-9]{12}/reports/(?:after-action\.md|evidence\.zip|"
+            r"evidence/evidence-[0-9]{8}T[0-9]{12}Z-[a-f0-9]{8}\.zip)"
+        ),
         r"/exercises/ttx_[a-f0-9]{12}/objectives/[0-9]+",
         r"/exercises/ttx_[a-f0-9]{12}/improvements",
         r"/improvements/imp_[a-f0-9]{12}/status/[a-z_]+",

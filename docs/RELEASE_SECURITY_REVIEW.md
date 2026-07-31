@@ -1,5 +1,43 @@
 # Release Security Review
 
+## v1.4 Evidence Trust and Browser Experience Delta
+
+Date: 2026-07-31
+
+The v1.4 evidence signing, retained-history, and browser-regression features were
+reviewed with the following controls:
+
+- Evidence manifest schema 4 declares every evidence path, byte count, and
+  SHA-256 digest and authenticates the exact manifest bytes with a detached
+  HMAC-SHA256 signature.
+- Signing keys contain 32 operating-system-random bytes, are created with
+  owner-only permissions, reject symlinks and permissive POSIX modes, and are
+  stored outside generated exercise packages.
+- Archives and backups never include the signing key. The key ID is a truncated
+  SHA-256 fingerprint used only to select the expected origin key.
+- Verification uses constant-time signature comparison and rejects key,
+  algorithm, manifest digest, file digest, byte count, and declared-member
+  mismatches.
+- ZIP validation bounds compressed size, expanded size, and member count and
+  rejects absolute, traversal, backslash, deeply nested, duplicate, symlinked,
+  and undeclared entries.
+- Retention writes with exclusive creation and generated names. Cleanup scans
+  only strict evidence filenames inside the path-contained exercise reports
+  directory and applies bounded age and count settings.
+- Retained downloads are read into bounded memory and verified before response;
+  request path values cannot select arbitrary files.
+- Shared-mode evaluator authorization explicitly matches only strict retained
+  evidence filenames.
+- Chromium regression tests use an isolated temporary data root and loopback
+  server, fail on browser exceptions, audit semantic accessibility conditions,
+  and exercise desktop and mobile role views.
+- Signing, tamper rejection, retention, configuration, authorization, route,
+  accessibility, and end-to-end export behavior are covered by automated tests.
+
+HMAC evidence signatures provide tamper evidence to parties that securely share
+the installation key. They do not provide public-key non-repudiation or attest
+that human-entered observations are accurate.
+
 ## v1.3 Portable Design and Shared Access Delta
 
 Date: 2026-07-31

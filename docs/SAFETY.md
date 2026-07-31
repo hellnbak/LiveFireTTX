@@ -26,7 +26,7 @@ LiveFireTTX must not generate, execute, or facilitate:
 - Arbitrary commands, executable injects, remote target addresses, or
   operator-selected filesystem paths
 
-## v1.3 Safety Guardrails
+## v1.4 Safety Guardrails
 
 - Allows only actions included in the generated scenario
 - Modifies generated synthetic state and package artifacts only
@@ -54,6 +54,10 @@ LiveFireTTX must not generate, execute, or facilitate:
   content from the portable pack schema
 - Requires authenticated role permissions before shared users reach design,
   facilitation, evaluation, backup, or account-administration routes
+- Signs evidence manifests with an installation key stored outside generated
+  packages and verifies every declared file before retained download
+- Retains only bounded per-exercise export history and prunes only strict
+  application-generated filenames inside the exercise package
 
 Dependency faults alter local API behavior only. They do not contact payment
 processors, queues, storage providers, telemetry systems, or third-party APIs.
@@ -67,6 +71,10 @@ processors, queues, storage providers, telemetry systems, or third-party APIs.
 - Readiness scores are provisional exercise signals, not compliance findings.
 - Evidence archives may contain participant notes and should be reviewed before
   external sharing.
+- Evidence signatures detect modification; they do not prove that facilitator
+  observations are true or provide legal non-repudiation.
+- Signing keys are not included in backups and must be protected separately when
+  long-term verification is required.
 
 ## Operator Guidance
 

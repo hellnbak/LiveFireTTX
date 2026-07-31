@@ -1,5 +1,8 @@
 :root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172033; background: #edf1f5; }
 body { margin: 0; }
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0, 0, 0, 0); white-space:nowrap; border:0; }
+.skip-link { position:fixed; top:8px; left:8px; z-index:1000; transform:translateY(-160%); background:#fff; color:#111827; border:3px solid #f97316; border-radius:10px; padding:10px 14px; font-weight:900; }
+.skip-link:focus { transform:translateY(0); }
 header { background: linear-gradient(120deg, #111827, #182c3f); color: white; padding: 22px 36px; display:flex; justify-content:space-between; align-items:center; border-bottom: 3px solid #f97316; }
 header h1 { margin:0; font-size: 26px; } header p { margin: 4px 0 0; color:#d1d5db; } header a { color:white; text-decoration:none; }
 .brand-row, .actions, .state-summary, .active-faults { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
@@ -14,6 +17,7 @@ main { max-width: 1180px; margin: 28px auto; padding: 0 20px; }
 .warning { background:#ffedd5; color:#9a3412; border:1px solid #fdba74; }
 .emergency { background:#991b1b; color:white; border:1px solid #7f1d1d; }
 .button:disabled { cursor:not-allowed; opacity:.45; }
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible { outline:3px solid #2563eb; outline-offset:3px; }
 form { display:grid; gap: 10px; } input, select, textarea { box-sizing:border-box; width:100%; min-width:0; max-width:100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 12px; font: inherit; }
 label { font-weight:700; margin-top: 8px; }
 .inline-form { display:block; }
@@ -60,6 +64,9 @@ label { font-weight:700; margin-top: 8px; }
 .evidence-stats { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:22px; }
 .evidence-stats span { padding:8px 11px; border-radius:12px; background:#111827; color:#cbd5e1; font-size:12px; }
 .evidence-stats strong { color:white; font-size:16px; margin-right:3px; }
+.evidence-trust { border-top:4px solid #7c3aed; }
+.evidence-history { display:grid; gap:8px; }
+.evidence-record { display:flex; align-items:center; justify-content:space-between; gap:14px; margin:0; }
 .objective-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
 .objective-assessment { border:1px solid #e2e8f0; border-left:5px solid #94a3b8; border-radius:14px; padding:14px; background:#f8fafc; }
 .objective-assessment.developing { border-left-color:#f59e0b; }
@@ -178,6 +185,10 @@ code { background:#f3f4f6; padding:2px 6px; border-radius:6px; }
 ul { margin-top: 8px; }
 @media (max-width: 800px) { .two, .clock-layout, .schedule-form, .inject-grid, .condition-grid, .inject-controls, .run-row, .command-summary, .telemetry-grid, .intelligence-overview, .signal-grid, .objective-grid, .objective-fields, .comparison-row, .studio-layout, .designer-fields, .safety-budget-editor, .stage-editor-grid, .artifact-fields { grid-template-columns:minmax(0, 1fr); } .designer-description, .stage-dependencies, .budget-preview { grid-column:auto; } .preview-lane { grid-template-columns:100px minmax(0, 1fr); } .score-ring { margin:auto; } .peak-values { justify-content:flex-start; } .import-form { align-items:stretch; flex-direction:column; } header, .row.between { align-items:flex-start; gap: 12px; flex-direction:column; } .stage-card-header { align-items:flex-start; flex-wrap:wrap; } .clock-controls { justify-content:flex-start; } }
 
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior:auto !important; transition-duration:.01ms !important; animation-duration:.01ms !important; animation-iteration-count:1 !important; }
+}
+
 .setup-shell { display:grid; gap:20px; }
 .scenario-preset-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:12px; }
 .scenario-preset { appearance:none; border:1px solid #cbd5e1; border-radius:16px; background:#f8fafc; color:#0f172a; padding:16px; text-align:left; display:grid; gap:7px; cursor:pointer; transition:border-color .2s, box-shadow .2s, transform .2s; }
@@ -292,4 +303,5 @@ ul { margin-top: 8px; }
   .presentation-current h3 { font-size:29px; }
   .presentation-current p { font-size:18px; }
   .header-nav, .account-row, .account-actions { align-items:flex-start; justify-content:flex-start; flex-direction:column; }
+  .evidence-record { align-items:flex-start; flex-direction:column; }
 }

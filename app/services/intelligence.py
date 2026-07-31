@@ -5,13 +5,13 @@ from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
-from io import BytesIO, StringIO
+from io import StringIO
 from typing import Any, Iterable, cast
-from zipfile import ZIP_DEFLATED, ZipFile
 import csv
 import json
 
 from app.models import Exercise, InjectOption
+from app.services.evidence import build_signed_archive
 from app.services.facilitator import clock_snapshot
 
 
@@ -408,6 +408,9 @@ def build_evidence_archive(
     intelligence: dict[str, Any],
     events: Iterable[Any],
     chaos_state: dict[str, Any] | None,
+    *,
+    signing_key: bytes,
+    generated_at: datetime | None = None,
 ) -> bytes:
     state = chaos_state or {}
     clock = clock_snapshot(exercise)
@@ -418,116 +421,87 @@ def build_evidence_archive(
         event_rows,
         state,
     )
-    buffer = BytesIO()
-    with ZipFile(buffer, "w", ZIP_DEFLATED) as archive:
-        archive.writestr("after_action_report.md", markdown)
-        archive.writestr(
-            "manifest.json",
-            json.dumps(
-                {
-                    "schema_version": 3,
-                    "exercise_id": exercise.id,
-                    "exercise_clock": {
-                        "status": clock["status"],
-                        "started_at": clock["started_at"],
-                        "completed_at": clock["completed_at"],
-                        "elapsed_seconds": clock["elapsed_seconds"],
-                        "planned_duration_seconds": clock["duration_seconds"],
-                    },
-                    "generated_at": datetime.now(timezone.utc).isoformat(),
-                    "files": [
-                        "after_action_report.md",
-                        "events.csv",
-                        "chaos_runs.csv",
-                        "objective_assessments.csv",
-                        "msel_checkpoints.csv",
-                        "improvement_actions.csv",
-                        "chaos_state.json",
-                    ],
-                },
-                indent=2,
-            ),
-        )
-        archive.writestr(
-            "events.csv",
-            _csv_text(
-                event_rows,
-                ["created_at", "event_type", "title", "detail"],
-            ),
-        )
-        archive.writestr(
-            "chaos_runs.csv",
-            _csv_text(
-                intelligence["run_comparison"],
-                [
-                    "id",
-                    "action",
-                    "status",
-                    "intensity",
-                    "pattern",
-                    "duration_seconds",
-                    "elapsed_seconds",
-                    "impact_score",
-                    "observation_count",
-                    "reason",
-                    "playbook_run_id",
-                ],
-            ),
-        )
-        archive.writestr(
-            "objective_assessments.csv",
-            _csv_text(
-                intelligence["objectives"],
-                [
-                    "index",
-                    "objective",
-                    "rating",
-                    "rating_label",
-                    "score",
-                    "notes",
-                    "updated_at",
-                ],
-            ),
-        )
-        archive.writestr(
-            "msel_checkpoints.csv",
-            _csv_text(
-                intelligence["checkpoints"],
-                [
-                    "id",
-                    "title",
-                    "description",
-                    "audience",
-                    "expected_action",
-                    "scheduled_offset_seconds",
-                    "objective_index",
-                    "status",
-                    "created_at",
-                    "completed_at",
-                ],
-            ),
-        )
-        archive.writestr(
-            "improvement_actions.csv",
-            _csv_text(
-                intelligence["improvement_actions"],
-                [
-                    "id",
-                    "title",
-                    "owner",
-                    "due_date",
-                    "status",
-                    "notes",
-                    "created_at",
-                    "completed_at",
-                ],
-            ),
-        )
-        archive.writestr(
-            "chaos_state.json",
-            json.dumps(state, indent=2, sort_keys=True),
-        )
-    return buffer.getvalue()
+    files = {
+        "after_action_report.md": markdown.encode("utf-8"),
+        "events.csv": _csv_text(
+            event_rows,
+            ["created_at", "event_type", "title", "detail"],
+        ).encode("utf-8"),
+        "chaos_runs.csv": _csv_text(
+            intelligence["run_comparison"],
+            [
+                "id",
+                "action",
+                "status",
+                "intensity",
+                "pattern",
+                "duration_seconds",
+                "elapsed_seconds",
+                "impact_score",
+                "observation_count",
+                "reason",
+                "playbook_run_id",
+            ],
+        ).encode("utf-8"),
+        "objective_assessments.csv": _csv_text(
+            intelligence["objectives"],
+            [
+                "index",
+                "objective",
+                "rating",
+                "rating_label",
+                "score",
+                "notes",
+                "updated_at",
+            ],
+        ).encode("utf-8"),
+        "msel_checkpoints.csv": _csv_text(
+            intelligence["checkpoints"],
+            [
+                "id",
+                "title",
+                "description",
+                "audience",
+                "expected_action",
+                "scheduled_offset_seconds",
+                "objective_index",
+                "status",
+                "created_at",
+                "completed_at",
+            ],
+        ).encode("utf-8"),
+        "improvement_actions.csv": _csv_text(
+            intelligence["improvement_actions"],
+            [
+                "id",
+                "title",
+                "owner",
+                "due_date",
+                "status",
+                "notes",
+                "created_at",
+                "completed_at",
+            ],
+        ).encode("utf-8"),
+        "chaos_state.json": json.dumps(
+            state,
+            indent=2,
+            sort_keys=True,
+        ).encode("utf-8"),
+    }
+    return build_signed_archive(
+        exercise=exercise,
+        exercise_clock={
+            "status": clock["status"],
+            "started_at": clock["started_at"],
+            "completed_at": clock["completed_at"],
+            "elapsed_seconds": clock["elapsed_seconds"],
+            "planned_duration_seconds": clock["duration_seconds"],
+        },
+        files=files,
+        signing_key=signing_key,
+        generated_at=generated_at,
+    )
 
 
 def _csv_text(rows: Iterable[dict[str, Any]], fields: list[str]) -> str:

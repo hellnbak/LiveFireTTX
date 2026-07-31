@@ -1,6 +1,6 @@
 # Scenario Packs
 
-LiveFireTTX v1.3 scenario packs are portable JSON exercise designs. They are
+LiveFireTTX v1.3+ scenario packs are portable JSON exercise designs. They are
 independent from generated exercise instances and do not include exercise IDs,
 package paths, trigger state, run events, assessments, improvement actions, or
 evidence.
@@ -27,7 +27,7 @@ SHA-256 checksum. Reusing a slug and version with different content is rejected.
 4. Tailor the generated exercise and MSEL as needed.
 5. In the command center, capture the resulting design with a new semantic
    version.
-6. Export the JSON pack and import it into another v1.3 installation.
+6. Export the JSON pack and import it into another compatible installation.
 
 The import form supports a local file picker without uploading to a separate
 storage location; browser JavaScript reads the file into the bounded JSON form.

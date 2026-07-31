@@ -4,7 +4,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     LIVEFIRE_DATABASE_PATH=/data/livefirettx.db \
     LIVEFIRE_GENERATED_ROOT=/data/generated/exercises \
-    LIVEFIRE_BACKUP_ROOT=/data/backups
+    LIVEFIRE_BACKUP_ROOT=/data/backups \
+    LIVEFIRE_EVIDENCE_SIGNING_KEY_PATH=/data/evidence-signing.key
 
 WORKDIR /app
 COPY requirements.txt /app/

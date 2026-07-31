@@ -117,12 +117,14 @@ class ExerciseIntelligenceTests(TestCase):
             intelligence,
             events,
             state,
+            signing_key=b"e" * 32,
         )
         with ZipFile(BytesIO(payload)) as archive:
             self.assertEqual(
                 {
                     "after_action_report.md",
                     "manifest.json",
+                    "manifest.sig",
                     "events.csv",
                     "chaos_runs.csv",
                     "objective_assessments.csv",
@@ -135,12 +137,16 @@ class ExerciseIntelligenceTests(TestCase):
             events_csv = archive.read("events.csv").decode()
             self.assertIn("'=unsafe spreadsheet formula", events_csv)
             self.assertIn(
-                '"schema_version": 3',
+                '"schema_version": 4',
                 archive.read("manifest.json").decode(),
             )
             self.assertIn(
                 '"exercise_clock"',
                 archive.read("manifest.json").decode(),
+            )
+            self.assertIn(
+                '"algorithm": "hmac-sha256"',
+                archive.read("manifest.sig").decode(),
             )
 
     def exercise(self) -> Exercise:

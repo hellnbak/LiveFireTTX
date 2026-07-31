@@ -61,6 +61,16 @@ from app.services.artifacts import (
     artifact_trigger_result,
     create_safe_artifact_inject,
 )
+from app.services.evidence import (
+    EvidenceVerificationError,
+    existing_key_id,
+    list_evidence_archives,
+    load_or_create_signing_key,
+    load_signing_key,
+    read_retained_archive,
+    save_evidence_archive,
+    signing_key_id,
+)
 from app.services.auth import (
     AUTH_COOKIE_NAME,
     LOCAL_ADMIN,
@@ -401,6 +411,23 @@ def _exercise_evidence(exercise):
     return injects, events, chaos_state, intelligence
 
 
+def _evidence_archive_context(exercise: Exercise) -> dict[str, Any]:
+    key = None
+    key_id = None
+    try:
+        key_id = existing_key_id(settings.evidence_signing_key_path)
+        if key_id:
+            key = load_signing_key(settings.evidence_signing_key_path)
+    except ValueError:
+        pass
+    return {
+        "archives": list_evidence_archives(exercise, key, limit=8),
+        "key_id": key_id,
+        "retention_days": settings.evidence_retention_days,
+        "retention_count": settings.evidence_retention_count,
+    }
+
+
 @app.on_event("startup")
 async def startup() -> None:
     init_db()
@@ -599,6 +626,7 @@ def exercise_detail(request: Request, exercise_id: str):
             "run_of_show": run_of_show,
             "lab": lab_snapshot(ex),
             "improvement_actions": list_improvement_actions(ex.id),
+            "evidence_exports": _evidence_archive_context(ex),
         },
     )
 
@@ -675,6 +703,7 @@ def exercise_evaluation(request: Request, exercise_id: str):
                 list_checkpoints(exercise.id),
             ),
             "improvement_actions": list_improvement_actions(exercise.id),
+            "evidence_exports": _evidence_archive_context(exercise),
         },
     )
 
@@ -1149,26 +1178,53 @@ def download_evidence_package(exercise_id: str):
     if not ex:
         raise HTTPException(404, "Exercise not found")
     _, events, chaos_state, intelligence = _exercise_evidence(ex)
-    archive = build_evidence_archive(
-        ex,
-        intelligence,
-        events,
-        chaos_state,
-    )
-    archive_path = exercise_package_path(
-        ex,
-        "reports",
-        "evidence_package.zip",
-    )
-    archive_path.parent.mkdir(parents=True, exist_ok=True)
-    archive_path.write_bytes(archive)
+    try:
+        signing_key = load_or_create_signing_key(
+            settings.evidence_signing_key_path
+        )
+        archive = build_evidence_archive(
+            ex,
+            intelligence,
+            events,
+            chaos_state,
+            signing_key=signing_key,
+        )
+        save_evidence_archive(
+            ex,
+            archive,
+            retention_days=settings.evidence_retention_days,
+            retention_count=settings.evidence_retention_count,
+        )
+    except (OSError, ValueError) as exc:
+        LOGGER.error("Evidence export failed: %s", type(exc).__name__)
+        raise HTTPException(503, "Evidence signing or storage is unavailable") from exc
     return Response(
         archive,
         media_type="application/zip",
         headers={
             "Content-Disposition": (
                 f'attachment; filename="{ex.id}-evidence.zip"'
-            )
+            ),
+            "X-LiveFire-Evidence-Key-ID": signing_key_id(signing_key),
+        },
+    )
+
+
+@app.get("/exercises/{exercise_id}/reports/evidence/{filename}")
+def download_retained_evidence_package(exercise_id: str, filename: str):
+    ex = get_exercise(exercise_id)
+    if not ex:
+        raise HTTPException(404, "Exercise not found")
+    try:
+        signing_key = load_signing_key(settings.evidence_signing_key_path)
+        archive = read_retained_archive(ex, filename, signing_key)
+    except (EvidenceVerificationError, ValueError) as exc:
+        raise HTTPException(409, "Evidence archive verification failed") from exc
+    return Response(
+        archive,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
         },
     )
 

@@ -36,6 +36,12 @@ class ConfigurationTests(TestCase):
         self.assertFalse(settings.secure_cookies)
         self.assertEqual("admin", settings.bootstrap_admin_username)
         self.assertIsNone(settings.bootstrap_admin_password)
+        self.assertEqual(
+            expected_root / "evidence-signing.key",
+            settings.evidence_signing_key_path,
+        )
+        self.assertEqual(365, settings.evidence_retention_days)
+        self.assertEqual(25, settings.evidence_retention_count)
 
     def test_data_root_sets_all_default_storage_paths(self) -> None:
         with patch.dict(
@@ -81,6 +87,9 @@ class ConfigurationTests(TestCase):
                 "LIVEFIRE_SECURE_COOKIES": "true",
                 "LIVEFIRE_BOOTSTRAP_ADMIN_USERNAME": "exercise.admin",
                 "LIVEFIRE_BOOTSTRAP_ADMIN_PASSWORD": "bootstrap-password-123",
+                "LIVEFIRE_EVIDENCE_SIGNING_KEY_PATH": "/tmp/livefire/evidence.key",
+                "LIVEFIRE_EVIDENCE_RETENTION_DAYS": "90",
+                "LIVEFIRE_EVIDENCE_RETENTION_COUNT": "12",
             },
             clear=True,
         ):
@@ -107,6 +116,12 @@ class ConfigurationTests(TestCase):
             "bootstrap-password-123",
             settings.bootstrap_admin_password,
         )
+        self.assertEqual(
+            Path("/tmp/livefire/evidence.key").resolve(),
+            settings.evidence_signing_key_path,
+        )
+        self.assertEqual(90, settings.evidence_retention_days)
+        self.assertEqual(12, settings.evidence_retention_count)
 
     def test_rejects_invalid_scheduler_configuration(self) -> None:
         for environment in [
@@ -122,6 +137,10 @@ class ConfigurationTests(TestCase):
             {"LIVEFIRE_SECURE_COOKIES": "sometimes"},
             {"LIVEFIRE_BOOTSTRAP_ADMIN_USERNAME": "Admin User"},
             {"LIVEFIRE_BOOTSTRAP_ADMIN_PASSWORD": "short"},
+            {"LIVEFIRE_EVIDENCE_RETENTION_DAYS": "0"},
+            {"LIVEFIRE_EVIDENCE_RETENTION_DAYS": "36501"},
+            {"LIVEFIRE_EVIDENCE_RETENTION_COUNT": "many"},
+            {"LIVEFIRE_EVIDENCE_RETENTION_COUNT": "10001"},
         ]:
             with self.subTest(environment=environment):
                 with patch.dict("os.environ", environment, clear=True):

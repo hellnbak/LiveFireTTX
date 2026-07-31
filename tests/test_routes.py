@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+from dataclasses import replace
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
+from zipfile import ZipFile
 
 from fastapi.testclient import TestClient
 
 from app import models
+from app.config import settings as default_settings
 from app.main import app
 
 
@@ -60,7 +64,7 @@ class ApplicationRouteTests(TestCase):
                 with TestClient(app) as client:
                     health = client.get("/healthz")
                     self.assertEqual(200, health.status_code)
-                    self.assertEqual("1.3.0", health.json()["version"])
+                    self.assertEqual("1.4.0", health.json()["version"])
                     self.assertTrue(health.json()["healthy"])
                     self.assertTrue(health.headers["x-request-id"])
                     self.assertEqual(
@@ -241,9 +245,16 @@ class ApplicationRouteTests(TestCase):
     def test_v12_operations_views_workflow_and_one_click_launch(self) -> None:
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
+            route_settings = replace(
+                default_settings,
+                evidence_signing_key_path=root / "evidence-signing.key",
+                evidence_retention_days=30,
+                evidence_retention_count=2,
+            )
             with (
                 patch.object(models, "DB_PATH", root / "livefirettx.db"),
                 patch.object(models, "GENERATED_ROOT", root / "exercises"),
+                patch("app.main.settings", route_settings),
                 patch(
                     "app.services.generator.GENERATED_ROOT",
                     root / "exercises",
@@ -359,6 +370,29 @@ class ApplicationRouteTests(TestCase):
                         f"/exercises/{exercise.id}/reports/evidence.zip"
                     )
                     self.assertEqual(200, evidence.status_code)
+                    self.assertEqual(
+                        16,
+                        len(evidence.headers["x-livefire-evidence-key-id"]),
+                    )
+                    with ZipFile(BytesIO(evidence.content)) as archive:
+                        self.assertIn("manifest.sig", archive.namelist())
+                    retained_path = next(
+                        (
+                            root
+                            / "exercises"
+                            / exercise.id
+                            / "reports"
+                            / "evidence"
+                        ).glob("*.zip")
+                    )
+                    retained = client.get(
+                        f"/exercises/{exercise.id}/reports/evidence/"
+                        f"{retained_path.name}"
+                    )
+                    self.assertEqual(200, retained.status_code)
+                    refreshed = client.get(f"/exercises/{exercise.id}")
+                    self.assertIn("Signed &amp; Retained Exports", refreshed.text)
+                    self.assertIn("Verified", refreshed.text)
 
     def test_v13_design_library_profile_and_pack_workflow(self) -> None:
         with TemporaryDirectory() as temporary:
