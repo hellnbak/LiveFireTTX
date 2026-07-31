@@ -61,3 +61,11 @@ The generated v0.4 chaos controller:
 ## Operator guidance
 
 Run generated environments only in isolated lab systems. Review generated packages before executing them. Do not expose the chaos control API beyond localhost, point generated controls at production systems, or replace generated actions with unreviewed code. Use cloud renderers only with scoped lab accounts when those features are added.
+
+## Evidence and scoring safety
+
+- Readiness scores are provisional exercise signals, not compliance findings.
+- Objective ratings are explicitly assigned by the facilitator and are never inferred.
+- Evidence exports contain local exercise data, notes, state, and artifact references.
+- CSV cells beginning with spreadsheet formula characters are escaped on export.
+- Operators should review evidence packages before sharing them outside the exercise team.

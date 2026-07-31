@@ -36,6 +36,35 @@ label { font-weight:700; margin-top: 8px; }
 .telemetry-card { border:1px solid #e2e8f0; border-radius:14px; padding:12px; background:#f8fafc; }
 .telemetry-track { height:7px; background:#e2e8f0; border-radius:999px; overflow:hidden; margin-top:10px; }
 .telemetry-track span { display:block; height:100%; background:linear-gradient(90deg, #f97316, #dc2626); border-radius:inherit; transition:width .3s ease; }
+.intelligence-panel { overflow:hidden; }
+.intelligence-overview { display:grid; grid-template-columns:180px 1fr; gap:24px; align-items:center; margin:20px 0; }
+.score-ring { width:160px; height:160px; border-radius:50%; display:grid; place-items:center; background:conic-gradient(#f97316 calc(var(--score) * 1%), #e2e8f0 0); }
+.score-core { width:126px; height:126px; border-radius:50%; display:grid; place-content:center; text-align:center; background:white; box-shadow:inset 0 0 0 1px #e2e8f0; }
+.score-core strong { font-size:38px; line-height:1; }
+.score-core span { max-width:90px; margin-top:6px; color:#64748b; font-size:11px; font-weight:800; text-transform:uppercase; }
+.signal-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; }
+.signal-card { border:1px solid #e2e8f0; border-radius:14px; padding:12px; background:#f8fafc; }
+.signal-track, .impact-track { height:7px; background:#e2e8f0; border-radius:999px; overflow:hidden; margin:9px 0; }
+.signal-track span { display:block; height:100%; background:linear-gradient(90deg, #f97316, #16a34a); border-radius:inherit; }
+.evidence-stats { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:22px; }
+.evidence-stats span { padding:8px 11px; border-radius:12px; background:#111827; color:#cbd5e1; font-size:12px; }
+.evidence-stats strong { color:white; font-size:16px; margin-right:3px; }
+.objective-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
+.objective-assessment { border:1px solid #e2e8f0; border-left:5px solid #94a3b8; border-radius:14px; padding:14px; background:#f8fafc; }
+.objective-assessment.developing { border-left-color:#f59e0b; }
+.objective-assessment.effective { border-left-color:#22c55e; }
+.objective-assessment.exemplary { border-left-color:#0f766e; }
+.objective-fields { display:grid; grid-template-columns:150px 1fr; gap:10px; }
+.objective-fields textarea { resize:vertical; }
+.comparison-list { display:grid; gap:10px; margin-top:16px; }
+.comparison-row { display:grid; grid-template-columns:1.2fr 1fr .8fr; gap:16px; align-items:center; border:1px solid #e2e8f0; border-radius:14px; padding:12px; }
+.comparison-meta { display:flex; align-items:center; gap:10px; min-width:0; }
+.comparison-meta > div { display:grid; gap:3px; min-width:0; }
+.comparison-meta strong { text-transform:capitalize; }
+.impact-column { font-size:12px; }
+.impact-track span { display:block; height:100%; background:linear-gradient(90deg, #fbbf24, #dc2626); border-radius:inherit; }
+.peak-values { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:6px; }
+.peak-values span { background:#f1f5f9; border-radius:999px; padding:5px 8px; color:#475569; font-size:11px; font-weight:700; }
 .active-faults { min-height:31px; margin:14px 0; }
 .condition-grid { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:10px; }
 .condition-grid.compact { margin-bottom:18px; }
@@ -79,4 +108,4 @@ label { font-weight:700; margin-top: 8px; }
 pre { white-space: pre-wrap; background:#111827; color:#e5e7eb; border-radius: 12px; padding: 10px; overflow:auto; }
 code { background:#f3f4f6; padding:2px 6px; border-radius:6px; }
 ul { margin-top: 8px; }
-@media (max-width: 800px) { .two, .inject-grid, .condition-grid, .inject-controls, .run-row, .command-summary, .telemetry-grid { grid-template-columns: 1fr; } header, .row.between { align-items:flex-start; gap: 12px; flex-direction:column; } }
+@media (max-width: 800px) { .two, .inject-grid, .condition-grid, .inject-controls, .run-row, .command-summary, .telemetry-grid, .intelligence-overview, .signal-grid, .objective-grid, .objective-fields, .comparison-row { grid-template-columns: 1fr; } .score-ring { margin:auto; } .peak-values { justify-content:flex-start; } header, .row.between { align-items:flex-start; gap: 12px; flex-direction:column; } }

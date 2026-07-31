@@ -2,7 +2,7 @@
 
 LiveFireTTX is a local-first application for building and running live-fire tabletop exercises. It helps facilitators generate a scenario-specific target environment, a safe chaos control plane, inject options, exercise artifacts, and a web console where the tabletop leader can steer the exercise.
 
-> **Status:** v0.4 prototype. Use only in controlled lab environments.
+> **Status:** v0.5 prototype. Use only in controlled lab environments.
 
 ## What it does
 
@@ -18,6 +18,10 @@ LiveFireTTX is a local-first application for building and running live-fire tabl
 - Enforces concurrency, severity, and total playbook time budgets
 - Provides pause, resume, skip, stop, and seeded replay controls
 - Streams live condition telemetry into the facilitator command center
+- Tracks facilitator ratings and evidence notes for every exercise objective
+- Computes a transparent provisional readiness score from assessment and run signals
+- Compares normalized observed impact across recent chaos runs
+- Exports Markdown, CSV, JSON, and state evidence in a single ZIP package
 - Automatically rolls back expired actions or runs that exceed stop conditions
 - Provides reset and emergency-stop controls
 - Makes the generated target respond to latency, error, auth, DNS, backup, build, and data-integrity conditions
@@ -70,7 +74,9 @@ http://127.0.0.1:8000
 5. Open the exercise console.
 6. Trigger narrative injects or chaos actions manually from the facilitator console.
 7. Add facilitator notes as the team makes decisions.
-8. Download the generated exercise package.
+8. Score objectives and review run-impact comparisons.
+9. Download the Markdown after-action report or ZIP evidence package.
+10. Download the generated exercise package.
 
 Generated packages are created under:
 
@@ -125,6 +131,7 @@ app/
   services/generator.py    # Exercise and inject generation
   services/lab_renderer.py # Target and safe chaos control-plane rendering
   services/runtime.py      # Validated local chaos execution
+  services/intelligence.py # Objective scoring, run comparison, evidence export
   templates/               # Jinja2 UI templates and CSS
 docs/
   ARCHITECTURE.md

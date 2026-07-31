@@ -46,15 +46,25 @@
 - Live observed-impact telemetry and command-center UI
 - Validated YAML playbook configuration
 
-## Next: v0.5 exercise intelligence
+## v0.5 Exercise intelligence
+
+- Run comparison and impact charts
+- Markdown/CSV evidence package export
+- Exercise scoring rubric and objective tracking
+- Provisional readiness scoring with visible component signals
+- Persisted facilitator ratings and evidence notes
+- Generated after-action Markdown reports
+- JSON state snapshot and export manifest
+- Spreadsheet formula-injection protection in CSV evidence
+
+## Next: v0.6 scenario design studio
 
 - Visual drag-and-drop playbook builder
 - Facilitator-defined safe artifact injects
 - Additional simulated service dependencies
-- Run comparison and impact charts
-- Markdown/CSV evidence package export
-- Exercise scoring rubric and objective tracking
 - Saved playbook template library
+- Playbook import, export, clone, and version history
+- Scenario preview and validation workspace
 
 ## Near-term exercise workflow
 
@@ -75,4 +85,4 @@
 - Multi-user authentication
 - Organization/workspace support
 - Versioned scenario library
-- Evidence package export
+- Signed and retention-managed evidence archives

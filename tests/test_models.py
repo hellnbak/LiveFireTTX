@@ -68,3 +68,20 @@ class ModelMigrationTests(TestCase):
                 self.assertIsNotNone(stored)
                 self.assertTrue(stored.triggered)
                 self.assertEqual(2, stored.trigger_count)
+
+                models.save_objective_assessment(
+                    exercise.id,
+                    0,
+                    "effective",
+                    "Impact was scoped within ten minutes.",
+                )
+                models.save_objective_assessment(
+                    exercise.id,
+                    0,
+                    "exemplary",
+                    "Impact was scoped and communicated within ten minutes.",
+                )
+                assessments = models.list_objective_assessments(exercise.id)
+                self.assertEqual(1, len(assessments))
+                self.assertEqual("exemplary", assessments[0]["rating"])
+                self.assertIn("communicated", assessments[0]["notes"])

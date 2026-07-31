@@ -165,6 +165,19 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS objective_assessments (
+                exercise_id TEXT NOT NULL,
+                objective_index INTEGER NOT NULL,
+                rating TEXT NOT NULL,
+                notes TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (exercise_id, objective_index),
+                FOREIGN KEY(exercise_id) REFERENCES exercises(id)
+            )
+            """
+        )
         conn.commit()
 
 
@@ -320,3 +333,48 @@ def add_event(exercise_id: str, event_type: str, title: str, detail: str) -> Non
 def list_events(exercise_id: str) -> List[sqlite3.Row]:
     with connect() as conn:
         return conn.execute("SELECT * FROM run_events WHERE exercise_id = ? ORDER BY created_at DESC", (exercise_id,)).fetchall()
+
+
+def save_objective_assessment(
+    exercise_id: str,
+    objective_index: int,
+    rating: str,
+    notes: str,
+) -> None:
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO objective_assessments (
+                exercise_id,
+                objective_index,
+                rating,
+                notes,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(exercise_id, objective_index) DO UPDATE SET
+                rating = excluded.rating,
+                notes = excluded.notes,
+                updated_at = excluded.updated_at
+            """,
+            (
+                exercise_id,
+                objective_index,
+                rating,
+                notes,
+                datetime.utcnow().isoformat() + "Z",
+            ),
+        )
+        conn.commit()
+
+
+def list_objective_assessments(exercise_id: str) -> List[sqlite3.Row]:
+    with connect() as conn:
+        return conn.execute(
+            """
+            SELECT *
+            FROM objective_assessments
+            WHERE exercise_id = ?
+            ORDER BY objective_index
+            """,
+            (exercise_id,),
+        ).fetchall()

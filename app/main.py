@@ -6,7 +6,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -20,11 +26,20 @@ from app.models import (
     init_db,
     list_events,
     list_exercises,
+    list_objective_assessments,
     mark_inject_triggered,
+    save_objective_assessment,
     save_exercise,
     save_injects,
 )
 from app.services.generator import create_exercise_from_request
+from app.services.intelligence import (
+    RATING_LABELS,
+    RATING_SCORES,
+    build_evidence_archive,
+    build_exercise_intelligence,
+    render_evidence_markdown,
+)
 from app.services.runtime import (
     ChaosExecutionError,
     ChaosPreflightError,
@@ -46,6 +61,20 @@ app = FastAPI(title="LiveFireTTX", version=__version__)
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 templates.env.globals["app_version"] = __version__
 app.mount("/static", StaticFiles(directory=str(BASE / "templates" / "static")), name="static")
+
+
+def _exercise_evidence(exercise):
+    injects = get_injects(exercise.id)
+    events = list_events(exercise.id)
+    chaos_state = read_chaos_state(exercise)
+    intelligence = build_exercise_intelligence(
+        exercise,
+        injects,
+        events,
+        chaos_state,
+        list_objective_assessments(exercise.id),
+    )
+    return injects, events, chaos_state, intelligence
 
 
 @app.on_event("startup")
@@ -118,8 +147,7 @@ def exercise_detail(request: Request, exercise_id: str):
     ex = get_exercise(exercise_id)
     if not ex:
         raise HTTPException(404, "Exercise not found")
-    injects = get_injects(exercise_id)
-    events = list_events(exercise_id)
+    injects, events, chaos_state, intelligence = _exercise_evidence(ex)
     by_stage = {}
     for i in injects:
         by_stage.setdefault(i.stage, []).append(i)
@@ -130,9 +158,11 @@ def exercise_detail(request: Request, exercise_id: str):
             "exercise": ex,
             "injects_by_stage": by_stage,
             "events": events,
-            "chaos_state": read_chaos_state(ex),
+            "chaos_state": chaos_state,
             "control_status": read_control_status(ex),
             "playbook_configuration": read_playbook_configuration(ex),
+            "intelligence": intelligence,
+            "rating_labels": RATING_LABELS,
         },
     )
 
@@ -245,6 +275,90 @@ def exercise_chaos_status(exercise_id: str):
             "state": read_chaos_state(ex),
             "control": read_control_status(ex),
         }
+    )
+
+
+@app.post("/exercises/{exercise_id}/objectives/{objective_index}")
+def assess_exercise_objective(
+    exercise_id: str,
+    objective_index: int,
+    rating: str = Form(...),
+    notes: str = Form(""),
+):
+    ex = get_exercise(exercise_id)
+    if not ex:
+        raise HTTPException(404, "Exercise not found")
+    if not 0 <= objective_index < len(ex.objectives):
+        raise HTTPException(404, "Objective not found")
+    if rating not in RATING_SCORES:
+        raise HTTPException(400, "Unknown objective rating")
+    notes = notes.strip()
+    if len(notes) > 2000:
+        raise HTTPException(400, "Objective notes must be 2000 characters or fewer")
+    save_objective_assessment(
+        exercise_id,
+        objective_index,
+        rating,
+        notes,
+    )
+    add_event(
+        exercise_id,
+        "objective_assessed",
+        f"Objective Assessed: {ex.objectives[objective_index]}",
+        f"Rating: {RATING_LABELS[rating]}\nNotes: {notes or 'None'}",
+    )
+    return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
+
+
+@app.get("/exercises/{exercise_id}/reports/after-action.md")
+def download_after_action_report(exercise_id: str):
+    ex = get_exercise(exercise_id)
+    if not ex:
+        raise HTTPException(404, "Exercise not found")
+    _, events, chaos_state, intelligence = _exercise_evidence(ex)
+    report = render_evidence_markdown(
+        ex,
+        intelligence,
+        events,
+        chaos_state,
+    )
+    report_path = Path(ex.package_path) / "reports" / "after_action_report.md"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(report)
+    return Response(
+        report,
+        media_type="text/markdown",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{exercise_id}-after-action.md"'
+            )
+        },
+    )
+
+
+@app.get("/exercises/{exercise_id}/reports/evidence.zip")
+def download_evidence_package(exercise_id: str):
+    ex = get_exercise(exercise_id)
+    if not ex:
+        raise HTTPException(404, "Exercise not found")
+    _, events, chaos_state, intelligence = _exercise_evidence(ex)
+    archive = build_evidence_archive(
+        ex,
+        intelligence,
+        events,
+        chaos_state,
+    )
+    archive_path = Path(ex.package_path) / "reports" / "evidence_package.zip"
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
+    archive_path.write_bytes(archive)
+    return Response(
+        archive,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{exercise_id}-evidence.zip"'
+            )
+        },
     )
 
 

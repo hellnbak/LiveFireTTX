@@ -434,10 +434,12 @@ def _render_report(root: Path, exercise: Exercise) -> None:
             {chr(10).join('- ' + objective for objective in exercise.objectives)}
 
             ## Timeline
-            _Export facilitator console events and paste here._
+            _Download the generated Markdown report or evidence package from the
+            facilitator console to populate this section automatically._
 
             ## Chaos Actions Applied
-            _Record action, intensity, observed effect, and reset time._
+            _The evidence export includes action, intensity, pattern, peak observed
+            impact, lifecycle status, and reset reason._
 
             ## What Went Well
 

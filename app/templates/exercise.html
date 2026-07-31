@@ -10,6 +10,8 @@
     <div class="actions">
       <a class="button" href="http://127.0.0.1:8088" target="_blank" rel="noreferrer">Open Target</a>
       <a class="button" href="http://127.0.0.1:8090/docs" target="_blank" rel="noreferrer">Chaos API</a>
+      <a class="button" href="/exercises/{{ exercise.id }}/reports/after-action.md">After-Action Report</a>
+      <a class="button primary" href="/exercises/{{ exercise.id }}/reports/evidence.zip">Evidence Package</a>
       <a class="button" href="/exercises/{{ exercise.id }}/download">Download Package</a>
     </div>
   </div>
@@ -25,6 +27,108 @@
     <ul>{% for p in exercise.participants %}<li>{{ p }}</li>{% endfor %}</ul>
   </div>
 </section>
+
+<section class="card wide intelligence-panel">
+  <div class="row between">
+    <div>
+      <p class="eyebrow">Exercise Intelligence</p>
+      <h3>Readiness &amp; Evidence</h3>
+      <p class="muted">The score combines facilitator assessments with execution, rollback, inject-coverage, and documentation signals.</p>
+    </div>
+    <span class="pill {{ 'healthy' if intelligence.get('assessment_complete') else 'active' }}">
+      {{ intelligence.get('assessed_objectives', 0) }}/{{ intelligence.get('objective_count', 0) }} objectives assessed
+    </span>
+  </div>
+  <div class="intelligence-overview">
+    <div class="score-ring" style="--score: {{ intelligence.get('readiness_score', 0) }}">
+      <div class="score-core">
+        <strong>{{ intelligence.get('readiness_score', 0) }}</strong>
+        <span>{{ intelligence.get('score_label', 'Needs assessment') }}</span>
+      </div>
+    </div>
+    <div class="signal-grid">
+      {% for label, value, detail in [
+        ('Objective Score', intelligence.get('objective_score', 0), intelligence.get('assessed_objectives', 0)|string + ' assessed'),
+        ('Inject Coverage', intelligence.get('inject_coverage', 0), intelligence.get('triggered_injects', 0)|string + ' of ' + intelligence.get('inject_count', 0)|string),
+        ('Safe Termination', intelligence.get('safe_run_rate', 0), intelligence.get('terminal_run_count', 0)|string + ' terminal runs'),
+        ('Documentation', intelligence.get('documentation_score', 0), intelligence.get('evidence_event_count', 0)|string + ' evidence events')
+      ] %}
+        <div class="signal-card">
+          <div class="row between"><span>{{ label }}</span><strong>{{ value }}%</strong></div>
+          <div class="signal-track"><span style="width: {{ value }}%"></span></div>
+          <small>{{ detail }}</small>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="evidence-stats">
+    <span><strong>{{ intelligence.get('chaos_run_count', 0) }}</strong> chaos runs</span>
+    <span><strong>{{ intelligence.get('playbook_run_count', 0) }}</strong> playbook runs</span>
+    <span><strong>{{ intelligence.get('completed_playbooks', 0) }}</strong> completed playbooks</span>
+    <span><strong>{{ intelligence.get('guardrail_stops', 0) }}</strong> guardrail stops</span>
+  </div>
+
+  <h4>Objective Scoring Rubric</h4>
+  <div class="objective-grid">
+    {% for objective in intelligence.get('objectives', []) %}
+      <form class="objective-assessment {{ objective.get('rating') }}" action="/exercises/{{ exercise.id }}/objectives/{{ objective.get('index') }}" method="post">
+        <div class="row between">
+          <strong>{{ loop.index }}. {{ objective.get('objective') }}</strong>
+          <span class="pill">{{ objective.get('score', 0) }}/3</span>
+        </div>
+        <div class="objective-fields">
+          <div class="control-field">
+            <label for="rating-{{ objective.get('index') }}">Rating</label>
+            <select id="rating-{{ objective.get('index') }}" name="rating">
+              {% for rating, label in rating_labels.items() %}
+                <option value="{{ rating }}" {{ 'selected' if rating == objective.get('rating') else '' }}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="control-field">
+            <label for="notes-{{ objective.get('index') }}">Evidence notes</label>
+            <textarea id="notes-{{ objective.get('index') }}" name="notes" rows="2" maxlength="2000" placeholder="Decision quality, timing, evidence, and follow-up gaps">{{ objective.get('notes', '') }}</textarea>
+          </div>
+        </div>
+        <button class="button" type="submit">Save Assessment</button>
+      </form>
+    {% endfor %}
+  </div>
+</section>
+
+{% if intelligence.get('run_comparison') %}
+<section class="card wide">
+  <div class="row between">
+    <div>
+      <p class="eyebrow">Run Comparison</p>
+      <h3>Observed Impact</h3>
+    </div>
+    <span class="muted">Normalized from peak latency, error, authentication, and DNS conditions.</span>
+  </div>
+  <div class="comparison-list">
+    {% for run in intelligence.get('run_comparison', []) %}
+      <div class="comparison-row">
+        <div class="comparison-meta">
+          <span class="run-status {{ run.get('status') }}">{{ run.get('status') }}</span>
+          <div>
+            <strong>{{ run.get('action')|replace('_', ' ') }}</strong>
+            <small>{{ run.get('intensity') }} · {{ run.get('pattern') }} · {{ run.get('observation_count') }} observations</small>
+          </div>
+        </div>
+        <div class="impact-column">
+          <div class="row between"><span>Impact index</span><strong>{{ run.get('impact_score') }}/100</strong></div>
+          <div class="impact-track"><span style="width: {{ run.get('impact_score') }}%"></span></div>
+        </div>
+        <div class="peak-values">
+          <span>{{ run.get('peak_conditions', {}).get('latency_ms', 0) }} ms</span>
+          <span>{{ (run.get('peak_conditions', {}).get('error_rate', 0) * 100)|round(1) }}% errors</span>
+          <span>{{ run.get('elapsed_seconds', '—') if run.get('elapsed_seconds') is not none else '—' }}s elapsed</span>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
 
 <section class="card wide">
   <div class="row between">

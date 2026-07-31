@@ -1,6 +1,6 @@
 # LiveFireTTX Architecture
 
-LiveFireTTX is intentionally local-first. Version 0.4 uses a FastAPI facilitator app, Jinja2 templates, SQLite persistence, and generated Docker Compose labs with a separate chaos orchestration service.
+LiveFireTTX is intentionally local-first. Version 0.5 uses a FastAPI facilitator app, Jinja2 templates, SQLite persistence, an exercise-intelligence service, and generated Docker Compose labs with a separate chaos orchestration service.
 
 ## Core flow
 
@@ -14,8 +14,9 @@ Facilitator input
   -> Triggered injects / safe chaos controller
   -> Shared simulation state
   -> Observable target behavior
+  -> Objective assessment + run intelligence
   -> Run log
-  -> After-action report template
+  -> Evidence package + after-action report
 ```
 
 ## Components
@@ -44,6 +45,19 @@ The web form captures scenario type, business system, difficulty, participants, 
 ### Facilitator Command Center
 
 The console groups injects by stage and lets the exercise leader manually trigger each inject. It also displays live condition telemetry, active fault patterns, playbook safety budgets, and orchestration timelines. Facilitators can edit validated YAML, launch or replay playbooks, pause future scheduling, skip stages, stop runs, reset state, or activate the global emergency stop. Trigger counts and action results are stored in SQLite and shown in the run log.
+
+### Exercise Intelligence
+
+`app/services/intelligence.py` combines objective assessments, facilitator
+events, inject coverage, chaos lifecycles, playbook outcomes, observations, and
+artifact references into explainable exercise signals. It does not infer that an
+objective was met; only the facilitator can assign a rubric rating.
+
+The service calculates normalized run-impact comparisons from observed latency,
+error, authentication, and DNS conditions. It also generates an after-action
+Markdown report and a ZIP evidence package containing Markdown, CSV, JSON state,
+and a manifest. Objective ratings and notes are persisted in SQLite, while
+generated reports are written into the exercise package under `reports/`.
 
 ### Target Environment
 
