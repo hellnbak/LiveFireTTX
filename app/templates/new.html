@@ -1,35 +1,92 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="card wide">
-  <h2>Create a LiveFireTTX Exercise</h2>
-  <form action="/exercises" method="post">
-    <label>Exercise name</label>
-    <input name="name" value="Ransomware impacting order processing" required>
+<section class="card wide setup-shell">
+  <div class="row between">
+    <div>
+      <p class="eyebrow">Guided Setup</p>
+      <h2>Create a LiveFireTTX Exercise</h2>
+      <p class="muted">Start with a tested scenario pack, then tailor the system, roles, objectives, and timing.</p>
+    </div>
+    <span class="pill healthy">Local Docker · safe simulation</span>
+  </div>
 
-    <label>Scenario type</label>
-    <select name="scenario_type">
-      {% for key, s in scenarios.items() %}<option value="{{ key }}">{{ s.label }}</option>{% endfor %}
-    </select>
+  <div class="scenario-preset-grid" role="group" aria-label="Scenario templates">
+    {% for key, scenario in scenarios.items() %}
+      <button
+        class="scenario-preset {{ 'selected' if loop.first else '' }}"
+        type="button"
+        data-scenario="{{ key }}"
+      >
+        <strong>{{ scenario.label }}</strong>
+        <span>{{ scenario.description }}</span>
+        <small>{{ scenario.chaos_modules|length }} fault types · {{ scenario.dependencies|length }} dependencies</small>
+      </button>
+    {% endfor %}
+  </div>
 
-    <label>Platform</label>
-    <select name="platform"><option value="local_docker">Local Docker</option><option value="aws_future" disabled>AWS - future renderer</option><option value="kubernetes_future" disabled>Kubernetes - future renderer</option></select>
+  <form action="/exercises" method="post" class="guided-form">
+    <input id="scenario-type" name="scenario_type" type="hidden" value="{{ scenarios|first }}">
+    <div class="grid two">
+      <div class="control-field">
+        <label for="exercise-name">Exercise name</label>
+        <input id="exercise-name" name="name" value="LiveFire readiness exercise" maxlength="120" required>
+      </div>
+      <div class="control-field">
+        <label for="business-system">Business system</label>
+        <input id="business-system" name="business_system" value="Order Processing" maxlength="120" required>
+      </div>
+      <div class="control-field">
+        <label for="difficulty">Difficulty</label>
+        <select id="difficulty" name="difficulty">
+          <option>beginner</option>
+          <option selected>intermediate</option>
+          <option>advanced</option>
+        </select>
+      </div>
+      <div class="control-field">
+        <label for="duration-minutes">Duration minutes</label>
+        <input id="duration-minutes" name="duration_minutes" type="number" min="15" max="480" value="90" required>
+      </div>
+    </div>
 
-    <label>Business system</label>
-    <input name="business_system" value="Order Processing">
+    <input name="platform" type="hidden" value="local_docker">
 
-    <label>Difficulty</label>
-    <select name="difficulty"><option>beginner</option><option selected>intermediate</option><option>advanced</option></select>
+    <div class="control-field">
+      <div class="row between">
+        <label for="participants">Participants, comma separated</label>
+        <button id="reset-roles" class="text-button" type="button">Use recommended roles</button>
+      </div>
+      <input id="participants" name="participants" maxlength="1800" required>
+      <small id="role-summary" class="muted"></small>
+    </div>
 
-    <label>Duration minutes</label>
-    <input name="duration_minutes" type="number" value="90">
+    <div class="control-field">
+      <div class="row between">
+        <label for="objectives">Objectives, one per line</label>
+        <button id="reset-objectives" class="text-button" type="button">Use template objectives</button>
+      </div>
+      <textarea id="objectives" name="objectives" rows="6" maxlength="5000"></textarea>
+    </div>
 
-    <label>Participants, comma separated</label>
-    <input name="participants" value="Incident Commander, Security Operations, Cloud/IT Operations, Communications, Business Owner">
+    <div class="setup-preview">
+      <div>
+        <span class="summary-label">Dependency Map</span>
+        <div id="dependency-preview" class="dependency-preview"></div>
+      </div>
+      <div>
+        <span class="summary-label">Generated Materials</span>
+        <ul>
+          <li>Role-specific participant briefs</li>
+          <li>Facilitator readiness checklist</li>
+          <li>Sample orders, dependencies, and communications</li>
+          <li>Validated chaos playbook and evidence templates</li>
+        </ul>
+      </div>
+    </div>
 
-    <label>Objectives, one per line. Leave blank for scenario defaults.</label>
-    <textarea name="objectives" rows="5"></textarea>
-
-    <button class="button primary" type="submit">Generate Exercise</button>
+    <button class="button primary" type="submit">Generate Exercise Package</button>
   </form>
-</div>
+</section>
+<script id="scenario-catalog" type="application/json">{{ scenarios|tojson }}</script>
+<script src="/static/new.js?v={{ app_version }}" defer></script>
 {% endblock %}

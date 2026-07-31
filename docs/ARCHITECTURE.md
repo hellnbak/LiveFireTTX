@@ -1,91 +1,129 @@
 # LiveFireTTX Architecture
 
-LiveFireTTX is intentionally local-first. Version 0.3 uses a FastAPI facilitator app, Jinja2 templates, SQLite persistence, and generated Docker Compose labs with a separate guarded chaos control service.
+LiveFireTTX v1.0 is intentionally local-first. The facilitator application uses
+FastAPI, Jinja2, SQLite, and filesystem-backed generated packages. Every
+exercise receives a separate Docker Compose target and chaos controller bound
+to localhost.
 
-## Core flow
+## Core Flow
 
 ```text
-Facilitator input
-  -> ExerciseCreate request
-  -> Scenario library lookup
-  -> Exercise + inject options
-  -> Generated package
-  -> Facilitator console
-  -> Triggered injects / safe chaos controller
-  -> Shared simulation state
-  -> Observable target behavior
-  -> Run log
-  -> After-action report template
+Guided scenario preset
+  -> validated exercise definition
+  -> role briefs + sample data + dependency map
+  -> generated target and scenario-scoped controller
+  -> facilitator injects and bounded playbooks
+  -> shared synthetic state
+  -> observable dependency behavior
+  -> objective assessment and run intelligence
+  -> evidence archive and after-action report
 ```
 
-## Components
+## Application Components
 
-### Scenario Builder
+### Configuration
 
-The web form captures scenario type, business system, difficulty, participants, duration, and objectives.
+`app/config.py` resolves database, generated-package, backup, controller, and
+timeout settings. The v1.0 controller URL is restricted to localhost.
 
-### Scenario Library
+### Persistence
 
-`app/models.py` contains the starter scenario library. Each scenario defines labels, descriptions, target modules, chaos modules, and default objectives.
+`app/models.py` owns SQLite access. Ordered migrations are recorded in
+`schema_migrations`. Connections enable foreign keys, a busy timeout, and WAL.
+Health checks run SQLite quick-check and expose the active schema version.
 
-### Exercise Generator
+`app/services/backups.py` uses SQLite's backup API to create a consistent
+snapshot, packages generated exercises with a versioned manifest, validates ZIP
+paths and symlinks, checks database integrity, and rejects newer schema versions
+before restore.
+
+### Scenario and Exercise Generation
+
+`app/models.py` defines scenario presets, dependency topology, recommended
+roles, target modules, safe chaos modules, and default objectives.
 
 `app/services/generator.py` and `app/services/lab_renderer.py` create:
 
-- `exercise.yml`
-- `facilitator_guide.md`
-- `participant_brief.md`
-- `target/` Docker Compose lab
-- `chaos/` scenario-scoped API, CLI, state engine, and artifacts
-- `artifacts/` exercise artifacts
-- `reports/after_action_template.md`
-- `cleanup/destroy.sh`
+- Exercise and chaos-plan YAML
+- Facilitator guide and readiness checklist
+- Shared and role-specific participant briefs
+- Simulated orders, dependencies, and communications data
+- Target and chaos-controller Docker sources
+- Safe artifacts and reports
+- Cleanup scripts
 
-### Facilitator Console
+### HTTP and UI
 
-The console groups injects by stage and lets the exercise leader manually trigger each inject. Guarded chaos runs support low, medium, and high intensity, bounded durations, reusable stop-condition profiles, repeat execution, reset, and emergency stop. Trigger counts and action results are stored in SQLite and shown in the run log.
+`app/main.py` hosts the facilitator workflow and inject/playbook routes.
+`app/routes/system.py` contains operational health, readiness, and backup
+endpoints. `app/routes/packages.py` serves path-contained participant material.
 
-### Target Environment
+The Jinja2 interface includes guided scenario setup, dependency topology,
+exercise intelligence, artifact design, live telemetry, run control, and the
+visual playbook editor. Browser checks improve feedback, while the generated
+controller remains authoritative for playbook validation.
 
-The target environment is generated per exercise. It exposes safe business and dependency endpoints that react to shared simulation conditions such as latency, application errors, authentication failures, DNS failures, backup delays, blocked builds, and seeded-record integrity issues.
+### Exercise Intelligence
 
-### Guarded Chaos Control Plane
+`app/services/intelligence.py` combines facilitator ratings, events, inject
+coverage, run lifecycles, playbook outcomes, observations, and artifacts.
+Impact comparison includes application, access, payment, queue, storage,
+third-party, and telemetry signals. Facilitators—not the application—determine
+whether objectives were achieved.
 
-The chaos environment is generated separately from the target environment and runs on `127.0.0.1:8090`. Its API and CLI share an allowlisted lifecycle engine. Each generated exercise contains only the actions relevant to its scenario. State updates use file locking and atomic replacement, while synthetic artifacts and run observations are retained for exercise evidence.
+## Generated Dependency Target
+
+The target reads shared controller state and exposes:
+
+- Application, order, authentication, DNS, backup, and build endpoints
+- Payment authorization
+- Queue health and consumer delay
+- Object reads with synthetic throttling and stale responses
+- Third-party availability and retry pressure
+- Delayed or missing synthetic telemetry
+- A dependency map with live healthy/degraded status
+
+Expired action effects are ignored by the target even when the controller is
+temporarily unavailable.
+
+## Chaos Control Plane
 
 ```text
-Facilitator Console or Chaos API
-  -> Controller and target preflight
-  -> Scenario action allowlist
-  -> Intensity + duration + stop conditions
-  -> Pending run
-  -> Locked state update
-  -> Active run
-  -> Synthetic artifact
-  -> Target reads shared state
-  -> Observable simulated impact
-  -> Duration elapsed or guardrail violation
-  -> Automatic rollback
-  -> Completed / aborted / failed run
+Facilitator Console / API / CLI
+  -> exercise identity and target preflight
+  -> scenario action allowlist
+  -> validated manual action or captured playbook
+  -> bounded duration + intensity + pattern
+  -> concurrency + severity + total-time budgets
+  -> atomic state update and synthetic artifact
+  -> target observation and guardrail checks
+  -> automatic completion, abort, or failure
+  -> retained evidence and reversible state
 ```
 
-The controller monitors active runs every two seconds. It records target
-observations and aborts runs when the target becomes unreachable, reports a
-different exercise ID, or exceeds configured latency or error-rate thresholds.
-The target independently ignores expired effects, preserving rollback behavior
-if the controller is temporarily unavailable.
+The controller uses file locking and atomic replacement. Active playbook stages
+capture their definition and replay seed so later edits cannot alter historical
+execution. Pausing prevents future scheduling without extending active actions.
 
-### Runtime Safety Boundary
+## Safety Boundary
 
-`app/services/runtime.py` verifies the running controller and target belong to the selected exercise, validates intensity, duration, and guardrail selections, and routes v0.3 actions through the guarded API. Legacy package execution remains path-contained and time-bounded.
+`app/services/runtime.py` verifies controller metadata, exercise identity,
+options, duration, patterns, and guardrails. YAML is size-limited and loaded
+safely. Package and artifact paths are resolved and contained. The controller
+accepts no shell commands, executable payloads, arbitrary target addresses, or
+operator-selected output paths.
 
-## Future renderers
+## Release Architecture
 
-The generator is structured so additional renderers can be added later:
+- `pyproject.toml` defines the installable application and `livefirettx` CLI.
+- `Dockerfile` and `compose.yml` provide a localhost-bound application runtime.
+- `.github/workflows/ci.yml` validates Python 3.11–3.13 and generated packages.
+- `.github/workflows/codeql.yml` performs scheduled and pull-request analysis.
+- `.github/workflows/release.yml` builds artifacts only after release gates pass.
+- `scripts/docker_release_smoke.sh` exercises generated target deployment,
+  preflight, bounded dependency injection, reset, and teardown.
 
-- AWS Terraform
-- AWS Fault Injection Service templates
-- Azure Chaos Studio
-- Kubernetes / Helm
-- SIEM / EDR synthetic alert connectors
-- Jira / ServiceNow / Slack / Teams inject delivery
+## Future Renderers
+
+Cloud and enterprise renderers remain adapters around the stable scenario and
+evidence model. They are not part of the v1.0 local safety contract.

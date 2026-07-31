@@ -5,11 +5,13 @@
     <div>
       <h2>{{ exercise.name }}</h2>
       <p><strong>{{ exercise.scenario_type }}</strong> · {{ exercise.business_system }} · {{ exercise.platform }} · {{ exercise.duration_minutes }} minutes</p>
-      <p><code>{{ exercise.package_path }}</code></p>
+      <p><code>{{ exercise.id }}</code> local exercise package</p>
     </div>
     <div class="actions">
       <a class="button" href="http://127.0.0.1:8088" target="_blank" rel="noreferrer">Open Target</a>
       <a class="button" href="http://127.0.0.1:8090/docs" target="_blank" rel="noreferrer">Chaos API</a>
+      <a class="button" href="/exercises/{{ exercise.id }}/reports/after-action.md">After-Action Report</a>
+      <a class="button primary" href="/exercises/{{ exercise.id }}/reports/evidence.zip">Evidence Package</a>
       <a class="button" href="/exercises/{{ exercise.id }}/download">Download Package</a>
     </div>
   </div>
@@ -23,15 +25,198 @@
   <div class="card">
     <h3>Participants</h3>
     <ul>{% for p in exercise.participants %}<li>{{ p }}</li>{% endfor %}</ul>
+    {% if participant_briefs %}
+      <div class="participant-links">
+        {% for brief in participant_briefs %}
+          <a href="/exercises/{{ exercise.id }}/participants/{{ brief.filename }}">
+            <span>{{ brief.role }}</span>
+            <strong>Brief ↓</strong>
+          </a>
+        {% endfor %}
+      </div>
+    {% endif %}
   </div>
 </section>
 
 <section class="card wide">
   <div class="row between">
     <div>
-      <p class="eyebrow">Guarded Chaos Control</p>
-      <h3>Run Safety &amp; Simulation State</h3>
-      <p class="muted">Every v0.3 run performs a target preflight, monitors stop conditions, and rolls back automatically.</p>
+      <p class="eyebrow">System Context</p>
+      <h3>Dependency Map</h3>
+      <p class="muted">Generated services expose safe business endpoints that react to these dependency conditions.</p>
+    </div>
+    <span id="dependency-map-status" class="pill {{ 'healthy' if dependency_status.get('reachable') else '' }}">
+      {{ 'Live target status' if dependency_status.get('reachable') else 'Designed topology' }}
+    </span>
+  </div>
+  <div id="dependency-map" class="dependency-map">
+    {% for dependency in dependency_map %}
+      {% set status = dependency_status_by_id.get(dependency.id, {}) %}
+      <article class="dependency-node {{ 'degraded' if status.get('status') == 'degraded' else '' }}" data-dependency-id="{{ dependency.id }}">
+        <strong>{{ dependency.label }}</strong>
+        <small>{{ dependency.type|replace('_', ' ') }}</small>
+        <span data-dependency-status>{{ status.get('status', 'configured') }}</span>
+      </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="card wide intelligence-panel">
+  <div class="row between">
+    <div>
+      <p class="eyebrow">Exercise Intelligence</p>
+      <h3>Readiness &amp; Evidence</h3>
+      <p class="muted">The score combines facilitator assessments with execution, rollback, inject-coverage, and documentation signals.</p>
+    </div>
+    <span class="pill {{ 'healthy' if intelligence.get('assessment_complete') else 'active' }}">
+      {{ intelligence.get('assessed_objectives', 0) }}/{{ intelligence.get('objective_count', 0) }} objectives assessed
+    </span>
+  </div>
+  <div class="intelligence-overview">
+    <div class="score-ring" style="--score: {{ intelligence.get('readiness_score', 0) }}">
+      <div class="score-core">
+        <strong>{{ intelligence.get('readiness_score', 0) }}</strong>
+        <span>{{ intelligence.get('score_label', 'Needs assessment') }}</span>
+      </div>
+    </div>
+    <div class="signal-grid">
+      {% for label, value, detail in [
+        ('Objective Score', intelligence.get('objective_score', 0), intelligence.get('assessed_objectives', 0)|string + ' assessed'),
+        ('Inject Coverage', intelligence.get('inject_coverage', 0), intelligence.get('triggered_injects', 0)|string + ' of ' + intelligence.get('inject_count', 0)|string),
+        ('Safe Termination', intelligence.get('safe_run_rate', 0), intelligence.get('terminal_run_count', 0)|string + ' terminal runs'),
+        ('Documentation', intelligence.get('documentation_score', 0), intelligence.get('evidence_event_count', 0)|string + ' evidence events')
+      ] %}
+        <div class="signal-card">
+          <div class="row between"><span>{{ label }}</span><strong>{{ value }}%</strong></div>
+          <div class="signal-track"><span style="width: {{ value }}%"></span></div>
+          <small>{{ detail }}</small>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="evidence-stats">
+    <span><strong>{{ intelligence.get('chaos_run_count', 0) }}</strong> chaos runs</span>
+    <span><strong>{{ intelligence.get('playbook_run_count', 0) }}</strong> playbook runs</span>
+    <span><strong>{{ intelligence.get('completed_playbooks', 0) }}</strong> completed playbooks</span>
+    <span><strong>{{ intelligence.get('guardrail_stops', 0) }}</strong> guardrail stops</span>
+  </div>
+
+  <h4>Objective Scoring Rubric</h4>
+  <div class="objective-grid">
+    {% for objective in intelligence.get('objectives', []) %}
+      <form class="objective-assessment {{ objective.get('rating') }}" action="/exercises/{{ exercise.id }}/objectives/{{ objective.get('index') }}" method="post">
+        <div class="row between">
+          <strong>{{ loop.index }}. {{ objective.get('objective') }}</strong>
+          <span class="pill">{{ objective.get('score', 0) }}/3</span>
+        </div>
+        <div class="objective-fields">
+          <div class="control-field">
+            <label for="rating-{{ objective.get('index') }}">Rating</label>
+            <select id="rating-{{ objective.get('index') }}" name="rating">
+              {% for rating, label in rating_labels.items() %}
+                <option value="{{ rating }}" {{ 'selected' if rating == objective.get('rating') else '' }}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="control-field">
+            <label for="notes-{{ objective.get('index') }}">Evidence notes</label>
+            <textarea id="notes-{{ objective.get('index') }}" name="notes" rows="2" maxlength="2000" placeholder="Decision quality, timing, evidence, and follow-up gaps">{{ objective.get('notes', '') }}</textarea>
+          </div>
+        </div>
+        <button class="button" type="submit">Save Assessment</button>
+      </form>
+    {% endfor %}
+  </div>
+</section>
+
+{% if intelligence.get('run_comparison') %}
+<section class="card wide">
+  <div class="row between">
+    <div>
+      <p class="eyebrow">Run Comparison</p>
+      <h3>Observed Impact</h3>
+    </div>
+    <span class="muted">Normalized from application, access, dependency, queue, and telemetry impact.</span>
+  </div>
+  <div class="comparison-list">
+    {% for run in intelligence.get('run_comparison', []) %}
+      <div class="comparison-row">
+        <div class="comparison-meta">
+          <span class="run-status {{ run.get('status') }}">{{ run.get('status') }}</span>
+          <div>
+            <strong>{{ run.get('action')|replace('_', ' ') }}</strong>
+            <small>{{ run.get('intensity') }} · {{ run.get('pattern') }} · {{ run.get('observation_count') }} observations</small>
+          </div>
+        </div>
+        <div class="impact-column">
+          <div class="row between"><span>Impact index</span><strong>{{ run.get('impact_score') }}/100</strong></div>
+          <div class="impact-track"><span style="width: {{ run.get('impact_score') }}%"></span></div>
+        </div>
+        <div class="peak-values">
+          <span>{{ run.get('peak_conditions', {}).get('latency_ms', 0) }} ms</span>
+          <span>{{ (run.get('peak_conditions', {}).get('error_rate', 0) * 100)|round(1) }}% errors</span>
+          <span>{{ run.get('elapsed_seconds', '—') if run.get('elapsed_seconds') is not none else '—' }}s elapsed</span>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<section class="grid two artifact-studio">
+  <div class="card">
+    <p class="eyebrow">Safe Artifact Designer</p>
+    <h3>Create Facilitator Inject</h3>
+    <p class="muted">Creates a clearly watermarked local exercise artifact. It cannot execute commands, contact external systems, or write outside this exercise package.</p>
+    <form action="/exercises/{{ exercise.id }}/artifacts" method="post">
+      <div class="artifact-fields">
+        <div class="control-field">
+          <label for="artifact-title">Title</label>
+          <input id="artifact-title" name="title" maxlength="120" required>
+        </div>
+        <div class="control-field">
+          <label for="artifact-audience">Audience</label>
+          <input id="artifact-audience" name="audience" maxlength="120" required>
+        </div>
+        <div class="control-field">
+          <label for="artifact-stage">Exercise Stage</label>
+          <input id="artifact-stage" name="stage" value="03-facilitator-artifacts" pattern="[a-z0-9][a-z0-9_-]{0,63}" required>
+        </div>
+        <div class="control-field">
+          <label for="artifact-kind">Artifact Type</label>
+          <select id="artifact-kind" name="artifact_kind">
+            {% for kind, detail in artifact_kinds.items() %}
+              <option value="{{ kind }}">{{ detail.get('label') }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="control-field">
+        <label for="artifact-content">Inject Content</label>
+        <textarea id="artifact-content" name="content" rows="8" maxlength="10000" placeholder="Write the simulated message, alert, ticket, or advisory participants should receive." required></textarea>
+      </div>
+      <button class="button primary" type="submit">Create Safe Artifact</button>
+    </form>
+  </div>
+  <div class="card artifact-safety">
+    <p class="eyebrow">Guardrails</p>
+    <h3>Artifact Safety Boundary</h3>
+    <ul>
+      <li>Stored only under <code>artifacts/facilitator/</code>.</li>
+      <li>Watermarked as simulated at the top and bottom.</li>
+      <li>Limited to approved email, message, alert, ticket, and advisory formats.</li>
+      <li>Added as a normal facilitator inject with complete run-log evidence.</li>
+      <li>Plain Markdown output only; no executable files or operator-selected paths.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="card wide">
+  <div class="row between">
+    <div>
+      <p class="eyebrow">Chaos Orchestration Studio</p>
+      <h3>Live Command Center</h3>
+      <p class="muted">Run deterministic fault patterns and multi-stage playbooks inside explicit safety budgets.</p>
     </div>
     <div class="actions">
       <form class="inline-form" action="/exercises/{{ exercise.id }}/chaos/reset" method="post">
@@ -46,10 +231,10 @@
     {% if control_status.get('mode') == 'legacy' %}
       <span class="pill">Legacy local controller</span>
     {% else %}
-      <span class="pill {{ 'healthy' if control_status.get('reachable') else 'failed' }}">
+      <span id="controller-pill" class="pill {{ 'healthy' if control_status.get('reachable') else 'failed' }}">
         Controller {{ 'online' if control_status.get('reachable') else 'offline' }}
       </span>
-      <span class="pill {{ 'healthy' if control_status.get('target', {}).get('reachable') else 'failed' }}">
+      <span id="target-pill" class="pill {{ 'healthy' if control_status.get('target', {}).get('reachable') else 'failed' }}">
         Target {{ 'verified' if control_status.get('ready') else 'not ready' }}
       </span>
       {% if control_status.get('reachable') and not control_status.get('matches_exercise') %}
@@ -58,21 +243,62 @@
     {% endif %}
   </div>
   {% if chaos_state and chaos_state.get('conditions') %}
-    <div class="state-summary">
-      <span class="pill">Revision {{ chaos_state.get('revision', 0) }}</span>
+    <div class="command-summary">
+      <div>
+        <span class="summary-label">State Revision</span>
+        <strong id="revision-value">{{ chaos_state.get('revision', 0) }}</strong>
+      </div>
+      <div>
+        <span class="summary-label">Active Faults</span>
+        <strong id="active-run-count">{{ chaos_state.get('active_actions', {})|length }}</strong>
+      </div>
+      <div>
+        <span class="summary-label">Playbook Runs</span>
+        <strong>{{ chaos_state.get('playbook_runs', [])|length }}</strong>
+      </div>
+      <div>
+        <span class="summary-label">Control Version</span>
+        <strong>{{ chaos_state.get('control_version', '1.0.0') }}</strong>
+      </div>
+    </div>
+    <div class="telemetry-grid">
+      {% for condition, label, maximum, suffix in [
+        ('latency_ms', 'Latency', 5000, ' ms'),
+        ('error_rate', 'Error Rate', 1, '%'),
+        ('auth_failure_rate', 'Auth Failure', 1, '%'),
+        ('dns_failure_rate', 'DNS Failure', 1, '%'),
+        ('payment_failure_rate', 'Payment Failure', 1, '%'),
+        ('third_party_error_rate', 'Vendor Errors', 1, '%'),
+        ('telemetry_gap_rate', 'Telemetry Gaps', 1, '%'),
+        ('queue_backlog_depth', 'Queue Backlog', 1000, '')
+      ] %}
+        {% set value = chaos_state.get('conditions', {}).get(condition, 0) %}
+        <div class="telemetry-card" data-condition="{{ condition }}" data-maximum="{{ maximum }}" data-suffix="{{ suffix }}">
+          <div class="row between">
+            <span>{{ label }}</span>
+            <strong data-value>{{ ((value * 100)|round(1)) if suffix == '%' else value }}{{ suffix }}</strong>
+          </div>
+          <div class="telemetry-track">
+            <span data-bar style="width: {{ ([((value / maximum) * 100), 100]|min) if maximum else 0 }}%"></span>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+    <div id="active-actions" class="active-faults">
       {% if chaos_state.get('active_actions') %}
         {% for action, detail in chaos_state.get('active_actions', {}).items() %}
-          <span class="pill active">{{ action|replace('_', ' ') }} · {{ detail.get('intensity', 'medium') }} · until {{ detail.get('expires_at', 'manual stop') }}</span>
+          <span class="pill active">{{ action|replace('_', ' ') }} · {{ detail.get('intensity', 'medium') }} · {{ detail.get('pattern', 'steady') }}</span>
         {% endfor %}
       {% else %}
-        <span class="pill healthy">No active runs</span>
+        <span class="pill healthy">No active faults</span>
       {% endif %}
     </div>
-    <div class="condition-grid">
-      {% for condition, value in chaos_state.get('conditions', {}).items() %}
-        <div class="condition {{ 'active' if value else '' }}">
+    <div class="condition-grid compact">
+      {% for condition in ['data_integrity', 'backup_delay', 'build_blocked', 'file_impact', 'stale_read_rate', 'telemetry_delay_seconds'] %}
+        {% set value = chaos_state.get('conditions', {}).get(condition, false) %}
+        <div class="condition {{ 'active' if value else '' }}" data-condition-flag="{{ condition }}">
           <span>{{ condition|replace('_', ' ') }}</span>
-          <strong>{{ value }}</strong>
+          <strong data-value>{{ 'active' if value else 'clear' }}</strong>
         </div>
       {% endfor %}
     </div>
@@ -84,7 +310,7 @@
             <div class="run-row">
               <span class="run-status {{ run.get('status', 'pending') }}">{{ run.get('status', 'pending') }}</span>
               <strong>{{ run.get('action', 'unknown')|replace('_', ' ') }}</strong>
-              <span>{{ run.get('intensity', 'medium') }} · {{ run.get('duration_seconds', '—') }}s</span>
+              <span>{{ run.get('intensity', 'medium') }} · {{ run.get('pattern', 'steady') }} · {{ run.get('duration_seconds', '—') }}s</span>
               <span>{{ run.get('reason', run.get('expires_at', 'awaiting preflight')) }}</span>
             </div>
           {% endif %}
@@ -92,9 +318,212 @@
       </div>
     {% endif %}
   {% else %}
-    <p class="muted">State is unavailable. Regenerate this exercise to use the v0.3 guarded controller.</p>
+    <p class="muted">State is unavailable. Deploy or regenerate this exercise to use the v1.0 orchestration controller.</p>
   {% endif %}
 </section>
+
+{% if playbook_library %}
+<section class="card wide studio-shell">
+  <div class="row between">
+    <div>
+      <p class="eyebrow">Scenario Design Studio</p>
+      <h3>Visual Playbook Builder</h3>
+      <p class="muted">Drag stages into order, preview timing, and validate dependencies and safety budgets before saving.</p>
+    </div>
+    <form id="playbook-import-form" class="import-form">
+      <input id="playbook-import-file" type="file" accept=".yml,.yaml,text/yaml" required>
+      <button class="button" type="submit" {{ 'disabled' if not control_status.get('reachable') else '' }}>Import YAML</button>
+    </form>
+  </div>
+  <div class="studio-layout">
+    <aside class="template-library">
+      <h4>Template Library</h4>
+      {% for playbook in playbook_library %}
+        <article class="template-card">
+          <div class="row between">
+            <div>
+              <strong>{{ playbook.get('name') }}</strong>
+              <small>{{ playbook.get('id') }} · {{ playbook.get('stages', [])|length }} stages</small>
+            </div>
+            <button class="button compact-button load-playbook" type="button" data-playbook-id="{{ playbook.get('id') }}">Edit</button>
+          </div>
+          <p>{{ playbook.get('description', '') }}</p>
+          <div class="budget-row">
+            <span>C {{ playbook.get('safety', {}).get('max_concurrent_actions', 2) }}</span>
+            <span>S {{ playbook.get('safety', {}).get('max_severity_points', 4) }}</span>
+            <span>{{ playbook.get('safety', {}).get('max_playbook_seconds', 1800) }}s</span>
+          </div>
+          <div class="template-actions">
+            <form class="inline-form" action="/exercises/{{ exercise.id }}/playbooks/{{ playbook.get('id') }}/start" method="post">
+              <button class="button primary compact-button" type="submit" {{ 'disabled' if not control_status.get('ready') else '' }}>Launch</button>
+            </form>
+            <a class="button compact-button" href="/exercises/{{ exercise.id }}/playbooks/{{ playbook.get('id') }}/export.yml">Export</a>
+          </div>
+          <details>
+            <summary>Clone or restore</summary>
+            <form class="clone-form" action="/exercises/{{ exercise.id }}/playbooks/{{ playbook.get('id') }}/clone" method="post">
+              <input name="new_playbook_id" placeholder="new_playbook_id" pattern="[a-z0-9][a-z0-9_-]{0,63}" required>
+              <input name="new_name" placeholder="New playbook name" maxlength="120" required>
+              <button class="button compact-button" type="submit">Clone Template</button>
+            </form>
+            {% if playbook.get('versions') %}
+              <div class="version-list">
+                {% for version in playbook.get('versions') %}
+                  <form action="/exercises/{{ exercise.id }}/playbooks/{{ playbook.get('id') }}/versions/{{ version.get('id') }}/restore" method="post">
+                    <span>{{ version.get('created_at') }}</span>
+                    <button class="button compact-button" type="submit">Restore</button>
+                  </form>
+                {% endfor %}
+              </div>
+            {% else %}
+              <small>No previous versions yet.</small>
+            {% endif %}
+          </details>
+        </article>
+      {% endfor %}
+    </aside>
+
+    <div class="visual-designer">
+      <div class="designer-fields">
+        <div class="control-field">
+          <label for="designer-id">Playbook ID</label>
+          <input id="designer-id" maxlength="64" pattern="[a-z0-9][a-z0-9_-]{0,63}">
+        </div>
+        <div class="control-field">
+          <label for="designer-name">Name</label>
+          <input id="designer-name" maxlength="120">
+        </div>
+        <div class="control-field designer-description">
+          <label for="designer-description">Description</label>
+          <textarea id="designer-description" rows="2" maxlength="500"></textarea>
+        </div>
+        <div class="control-field">
+          <label for="designer-seed">Replay Seed</label>
+          <input id="designer-seed" type="number">
+        </div>
+      </div>
+      <div class="safety-budget-editor">
+        <div class="control-field">
+          <label for="designer-concurrency">Max Concurrent</label>
+          <input id="designer-concurrency" type="number" min="1" max="5">
+        </div>
+        <div class="control-field">
+          <label for="designer-severity">Max Severity</label>
+          <input id="designer-severity" type="number" min="1" max="15">
+        </div>
+        <div class="control-field">
+          <label for="designer-window">Time Budget</label>
+          <input id="designer-window" type="number" min="60" max="7200">
+        </div>
+        <div id="budget-preview" class="budget-preview"></div>
+      </div>
+
+      <div class="row between stage-toolbar">
+        <div>
+          <h4>Stages</h4>
+          <small>Drag cards to reorder. Dependencies use comma-separated stage IDs.</small>
+        </div>
+        <button id="add-stage" class="button" type="button">Add Stage</button>
+      </div>
+      <div id="designer-stages" class="designer-stages"></div>
+
+      <div class="preview-panel">
+        <div class="row between">
+          <h4>Timeline Preview</h4>
+          <span id="preview-duration" class="pill"></span>
+        </div>
+        <div id="timeline-preview" class="timeline-preview"></div>
+      </div>
+      <div id="designer-validation" class="designer-validation">Edit a stage to begin validation.</div>
+      <div class="actions">
+        <button id="validate-playbook" class="button" type="button" {{ 'disabled' if not control_status.get('reachable') else '' }}>Validate with Controller</button>
+        <button id="save-playbook" class="button primary" type="button" {{ 'disabled' if not control_status.get('reachable') else '' }}>Save Version</button>
+      </div>
+    </div>
+  </div>
+  <details class="advanced-yaml">
+    <summary>Advanced YAML editor</summary>
+    <p class="muted">Direct YAML saves use the same controller validation and create a version snapshot.</p>
+    <form action="/exercises/{{ exercise.id }}/playbooks" method="post">
+      <label for="advanced-playbook-yaml">Playbook YAML</label>
+      <textarea id="advanced-playbook-yaml" class="yaml-editor" name="playbook_yaml" rows="18" spellcheck="false" required>{{ playbook_configuration }}</textarea>
+      <button class="button" type="submit" {{ 'disabled' if not control_status.get('reachable') else '' }}>Validate &amp; Save YAML</button>
+    </form>
+  </details>
+</section>
+{% endif %}
+
+<template id="designer-stage-template">
+  <article class="designer-stage" draggable="true">
+    <div class="stage-card-header">
+      <span class="drag-handle" title="Drag to reorder">⋮⋮</span>
+      <strong data-stage-number>Stage</strong>
+      <div class="actions">
+        <button class="button compact-button duplicate-stage" type="button">Duplicate</button>
+        <button class="button compact-button remove-stage" type="button">Remove</button>
+      </div>
+    </div>
+    <div class="stage-editor-grid">
+      <div class="control-field"><label>Stage ID</label><input data-field="id" maxlength="64"></div>
+      <div class="control-field"><label>Title</label><input data-field="title" maxlength="120"></div>
+      <div class="control-field"><label>Action</label><select data-field="action"></select></div>
+      <div class="control-field"><label>Intensity</label><select data-field="intensity"><option>low</option><option>medium</option><option>high</option></select></div>
+      <div class="control-field"><label>Pattern</label><select data-field="pattern"><option>steady</option><option>ramp</option><option>burst</option><option>flap</option><option>jitter</option></select></div>
+      <div class="control-field"><label>Guardrails</label><select data-field="guardrail_profile"><option>strict</option><option>standard</option><option>observe</option></select></div>
+      <div class="control-field"><label>Duration (seconds)</label><input data-field="duration_seconds" type="number" min="15" max="3600"></div>
+      <div class="control-field"><label>Start After (seconds)</label><input data-field="start_after_seconds" type="number" min="0" max="7200"></div>
+      <div class="control-field stage-dependencies"><label>Depends On</label><input data-field="depends_on" placeholder="stage_one, stage_two"></div>
+    </div>
+  </article>
+</template>
+
+{% if chaos_state and chaos_state.get('playbook_runs') %}
+<section class="card wide">
+  <p class="eyebrow">Orchestration Timeline</p>
+  <h3>Recent Playbook Runs</h3>
+  {% for playbook_run in chaos_state.get('playbook_runs')|reverse %}
+    {% if loop.index <= 4 %}
+      <div class="playbook-run" data-playbook-run="{{ playbook_run.get('id') }}">
+        <div class="row between">
+          <div>
+            <strong>{{ playbook_run.get('name') }}</strong>
+            <span class="run-status {{ playbook_run.get('status') }}" data-playbook-status>{{ playbook_run.get('status') }}</span>
+            <div class="muted">Run {{ playbook_run.get('id') }} · seed {{ playbook_run.get('seed') }}{% if playbook_run.get('replay_of') %} · replay of {{ playbook_run.get('replay_of') }}{% endif %}</div>
+          </div>
+          <div class="actions">
+            {% if playbook_run.get('status') == 'running' %}
+              <form class="inline-form" action="/exercises/{{ exercise.id }}/playbook-runs/{{ playbook_run.get('id') }}/pause" method="post"><button class="button warning" type="submit">Pause Schedule</button></form>
+              <form class="inline-form" action="/exercises/{{ exercise.id }}/playbook-runs/{{ playbook_run.get('id') }}/stop" method="post"><button class="button emergency" type="submit">Stop</button></form>
+            {% elif playbook_run.get('status') == 'paused' %}
+              <form class="inline-form" action="/exercises/{{ exercise.id }}/playbook-runs/{{ playbook_run.get('id') }}/resume" method="post"><button class="button primary" type="submit">Resume</button></form>
+              <form class="inline-form" action="/exercises/{{ exercise.id }}/playbook-runs/{{ playbook_run.get('id') }}/stop" method="post"><button class="button emergency" type="submit">Stop</button></form>
+            {% else %}
+              <form class="inline-form" action="/exercises/{{ exercise.id }}/playbook-runs/{{ playbook_run.get('id') }}/replay" method="post"><button class="button" type="submit" {{ 'disabled' if not control_status.get('ready') else '' }}>Replay Seed</button></form>
+            {% endif %}
+          </div>
+        </div>
+        <div class="stage-timeline">
+          {% for stage in playbook_run.get('stages', []) %}
+            <div class="timeline-stage {{ stage.get('status', 'pending') }}" data-stage="{{ stage.get('id') }}">
+              <span class="stage-index">{{ loop.index }}</span>
+              <div>
+                <strong>{{ stage.get('title') }}</strong>
+                <div>{{ stage.get('action')|replace('_', ' ') }} · {{ stage.get('pattern', 'steady') }} · +{{ stage.get('start_after_seconds', 0) }}s</div>
+                <small data-stage-status>{{ stage.get('status', 'pending') }}{% if stage.get('waiting_reason') %} · {{ stage.get('waiting_reason')|replace('_', ' ') }}{% endif %}</small>
+              </div>
+              {% if stage.get('status') in ['pending', 'starting', 'active'] %}
+                <form class="inline-form" action="/exercises/{{ exercise.id }}/playbook-runs/{{ playbook_run.get('id') }}/stages/{{ stage.get('id') }}/skip" method="post">
+                  <button class="button compact-button" type="submit">Skip</button>
+                </form>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+  {% endfor %}
+</section>
+{% endif %}
 
 <section class="card wide">
   <h3>Facilitator Inject Console</h3>
@@ -115,6 +544,14 @@
                 <select id="intensity-{{ inj.id }}" name="intensity">
                   {% for level in inj.payload.get('intensities', ['medium']) %}
                     <option value="{{ level }}" {{ 'selected' if level == inj.payload.get('default_intensity', 'medium') else '' }}>{{ level|title }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="control-field">
+                <label for="pattern-{{ inj.id }}">Pattern</label>
+                <select id="pattern-{{ inj.id }}" name="pattern">
+                  {% for pattern in inj.payload.get('patterns', ['steady']) %}
+                    <option value="{{ pattern }}" {{ 'selected' if pattern == inj.payload.get('default_pattern', 'steady') else '' }}>{{ pattern|title }}</option>
                   {% endfor %}
                 </select>
               </div>
@@ -155,8 +592,10 @@
   <div class="card">
     <h3>Add Facilitator Note</h3>
     <form action="/exercises/{{ exercise.id }}/events" method="post">
-      <label>Title</label><input name="title" required>
-      <label>Detail</label><textarea name="detail" rows="4" required></textarea>
+      <label for="facilitator-note-title">Title</label>
+      <input id="facilitator-note-title" name="title" maxlength="120" required>
+      <label for="facilitator-note-detail">Detail</label>
+      <textarea id="facilitator-note-detail" name="detail" rows="4" maxlength="5000" required></textarea>
       <button class="button" type="submit">Add Note</button>
     </form>
   </div>
@@ -167,4 +606,443 @@
     {% endfor %}
   </div>
 </section>
+<script>
+(() => {
+  const stageContainer = document.querySelector("#designer-stages");
+  if (!stageContainer) return;
+
+  const exerciseId = {{ exercise.id|tojson }};
+  const playbookLibrary = {{ playbook_library|tojson }};
+  const chaosActions = {{ chaos_actions|tojson }};
+  const initialPlaybook = {{ designer_playbook|tojson }};
+  const stageTemplate = document.querySelector("#designer-stage-template");
+  const validationPanel = document.querySelector("#designer-validation");
+  const timelinePreview = document.querySelector("#timeline-preview");
+  const previewDuration = document.querySelector("#preview-duration");
+  const severityPoints = {low: 1, medium: 2, high: 3};
+  let draggedStage = null;
+  let stageControlSequence = 0;
+
+  const field = (id) => document.querySelector(`#${id}`);
+  const value = (id, fallback = "") => field(id)?.value ?? fallback;
+  const numberValue = (id, fallback) => Number(value(id, fallback)) || fallback;
+
+  const stageFromCard = (card) => {
+    const stageValue = (name) => card.querySelector(`[data-field="${name}"]`).value;
+    return {
+      id: stageValue("id").trim(),
+      title: stageValue("title").trim(),
+      action: stageValue("action"),
+      intensity: stageValue("intensity"),
+      pattern: stageValue("pattern"),
+      duration_seconds: Number(stageValue("duration_seconds")) || 0,
+      start_after_seconds: Number(stageValue("start_after_seconds")) || 0,
+      guardrail_profile: stageValue("guardrail_profile"),
+      depends_on: stageValue("depends_on").split(",").map((item) => item.trim()).filter(Boolean),
+    };
+  };
+
+  const collectPlaybook = () => ({
+    id: value("designer-id").trim(),
+    name: value("designer-name").trim(),
+    description: value("designer-description").trim(),
+    seed: numberValue("designer-seed", 2026),
+    safety: {
+      max_concurrent_actions: numberValue("designer-concurrency", 2),
+      max_severity_points: numberValue("designer-severity", 4),
+      max_playbook_seconds: numberValue("designer-window", 1800),
+    },
+    stages: [...stageContainer.querySelectorAll(".designer-stage")].map(stageFromCard),
+  });
+
+  const updateStageNumbers = () => {
+    stageContainer.querySelectorAll(".designer-stage").forEach((card, index) => {
+      const stageLabel = `Stage ${index + 1}`;
+      card.querySelector("[data-stage-number]").textContent = stageLabel;
+      card.querySelector(".duplicate-stage").setAttribute("aria-label", `Duplicate ${stageLabel}`);
+      card.querySelector(".remove-stage").setAttribute("aria-label", `Remove ${stageLabel}`);
+    });
+  };
+
+  const renderStage = (stage = {}) => {
+    const fragment = stageTemplate.content.cloneNode(true);
+    const card = fragment.querySelector(".designer-stage");
+    const controlPrefix = `designer-stage-${++stageControlSequence}`;
+    card.querySelectorAll(".control-field").forEach((control) => {
+      const input = control.querySelector("input, select");
+      const label = control.querySelector("label");
+      if (!input || !label) return;
+      input.id = `${controlPrefix}-${input.dataset.field}`;
+      label.htmlFor = input.id;
+    });
+    const actionSelect = card.querySelector('[data-field="action"]');
+    for (const action of chaosActions) {
+      const option = document.createElement("option");
+      option.value = action.id;
+      option.textContent = `${action.label} (${action.id})`;
+      actionSelect.append(option);
+    }
+    const defaults = {
+      id: `stage_${stageContainer.children.length + 1}`,
+      title: chaosActions[0]?.label || "Scenario Stage",
+      action: chaosActions[0]?.id || "",
+      intensity: "medium",
+      pattern: "steady",
+      duration_seconds: 180,
+      start_after_seconds: stageContainer.children.length * 60,
+      guardrail_profile: "standard",
+      depends_on: [],
+      ...stage,
+    };
+    for (const [name, stageValue] of Object.entries(defaults)) {
+      const input = card.querySelector(`[data-field="${name}"]`);
+      if (!input) continue;
+      input.value = Array.isArray(stageValue) ? stageValue.join(", ") : stageValue;
+    }
+    card.querySelector(".remove-stage").addEventListener("click", () => {
+      card.remove();
+      updateDesigner();
+    });
+    card.querySelector(".duplicate-stage").addEventListener("click", () => {
+      const copy = stageFromCard(card);
+      const ids = new Set(collectPlaybook().stages.map((item) => item.id));
+      let candidate = `${copy.id || "stage"}_copy`;
+      let suffix = 2;
+      while (ids.has(candidate)) candidate = `${copy.id}_copy_${suffix++}`;
+      copy.id = candidate;
+      copy.title = `${copy.title || "Stage"} Copy`;
+      renderStage(copy);
+      updateDesigner();
+    });
+    card.addEventListener("dragstart", () => {
+      draggedStage = card;
+      card.classList.add("dragging");
+    });
+    card.addEventListener("dragend", () => {
+      draggedStage = null;
+      card.classList.remove("dragging");
+      updateDesigner();
+    });
+    card.addEventListener("input", updateDesigner);
+    card.addEventListener("change", updateDesigner);
+    stageContainer.append(card);
+    updateStageNumbers();
+  };
+
+  const loadPlaybook = (playbook) => {
+    if (!playbook) return;
+    field("designer-id").value = playbook.id || "";
+    field("designer-name").value = playbook.name || "";
+    field("designer-description").value = playbook.description || "";
+    field("designer-seed").value = playbook.seed ?? 2026;
+    field("designer-concurrency").value = playbook.safety?.max_concurrent_actions ?? 2;
+    field("designer-severity").value = playbook.safety?.max_severity_points ?? 4;
+    field("designer-window").value = playbook.safety?.max_playbook_seconds ?? 1800;
+    stageContainer.replaceChildren();
+    for (const stage of playbook.stages || []) renderStage(stage);
+    if (!stageContainer.children.length) renderStage();
+    updateDesigner();
+  };
+
+  const dependencyErrors = (stages) => {
+    const errors = [];
+    const ids = stages.map((stage) => stage.id);
+    const idSet = new Set(ids);
+    if (idSet.size !== ids.length) errors.push("Stage IDs must be unique.");
+    const graph = new Map(stages.map((stage) => [stage.id, stage.depends_on]));
+    for (const stage of stages) {
+      if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(stage.id)) errors.push(`Invalid stage ID: ${stage.id || "(blank)"}.`);
+      const unknown = stage.depends_on.filter((dependency) => !idSet.has(dependency));
+      if (unknown.length) errors.push(`${stage.id} has unknown dependencies: ${unknown.join(", ")}.`);
+      if (stage.depends_on.includes(stage.id)) errors.push(`${stage.id} cannot depend on itself.`);
+    }
+    const visiting = new Set();
+    const visited = new Set();
+    const visit = (id) => {
+      if (visiting.has(id)) return true;
+      if (visited.has(id) || !graph.has(id)) return false;
+      visiting.add(id);
+      for (const dependency of graph.get(id)) {
+        if (visit(dependency)) return true;
+      }
+      visiting.delete(id);
+      visited.add(id);
+      return false;
+    };
+    if (ids.some(visit)) errors.push("Stage dependencies contain a cycle.");
+    return errors;
+  };
+
+  const budgetMetrics = (stages) => {
+    const events = [];
+    for (const stage of stages) {
+      const start = Math.max(0, stage.start_after_seconds || 0);
+      const end = start + Math.max(0, stage.duration_seconds || 0);
+      const severity = severityPoints[stage.intensity] || 0;
+      events.push({time: start, count: 1, severity});
+      events.push({time: end, count: -1, severity: -severity});
+    }
+    events.sort((left, right) => left.time - right.time || left.count - right.count);
+    let count = 0;
+    let severity = 0;
+    let maxCount = 0;
+    let maxSeverity = 0;
+    for (const event of events) {
+      count += event.count;
+      severity += event.severity;
+      maxCount = Math.max(maxCount, count);
+      maxSeverity = Math.max(maxSeverity, severity);
+    }
+    return {
+      maxCount,
+      maxSeverity,
+      duration: stages.reduce(
+        (maximum, stage) => Math.max(maximum, stage.start_after_seconds + stage.duration_seconds),
+        0,
+      ),
+    };
+  };
+
+  const localValidation = (playbook) => {
+    const errors = [];
+    if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(playbook.id)) errors.push("Playbook ID is invalid.");
+    if (!playbook.name || playbook.name.length > 120) errors.push("Playbook name is required.");
+    if (playbook.stages.length < 1 || playbook.stages.length > 20) errors.push("Use between 1 and 20 stages.");
+    if (playbook.safety.max_concurrent_actions < 1 || playbook.safety.max_concurrent_actions > 5) errors.push("Concurrent budget must be 1–5.");
+    if (playbook.safety.max_severity_points < 1 || playbook.safety.max_severity_points > 15) errors.push("Severity budget must be 1–15.");
+    if (playbook.safety.max_playbook_seconds < 60 || playbook.safety.max_playbook_seconds > 7200) errors.push("Time budget must be 60–7200 seconds.");
+    for (const stage of playbook.stages) {
+      if (!stage.title) errors.push(`${stage.id || "A stage"} needs a title.`);
+      if (stage.duration_seconds < 15 || stage.duration_seconds > 3600) errors.push(`${stage.id || "A stage"} duration must be 15–3600 seconds.`);
+      if (stage.start_after_seconds < 0 || stage.start_after_seconds > playbook.safety.max_playbook_seconds) errors.push(`${stage.id || "A stage"} starts outside the time budget.`);
+    }
+    errors.push(...dependencyErrors(playbook.stages));
+    return {errors, metrics: budgetMetrics(playbook.stages)};
+  };
+
+  const renderTimeline = (playbook, metrics) => {
+    timelinePreview.replaceChildren();
+    const scale = Math.max(playbook.safety.max_playbook_seconds, metrics.duration, 1);
+    previewDuration.textContent = `${metrics.duration}s designed / ${playbook.safety.max_playbook_seconds}s budget`;
+    for (const [index, stage] of playbook.stages.entries()) {
+      const lane = document.createElement("div");
+      lane.className = "preview-lane";
+      const label = document.createElement("span");
+      label.textContent = `${index + 1}. ${stage.id || "unnamed"}`;
+      const track = document.createElement("div");
+      track.className = "preview-track";
+      const bar = document.createElement("span");
+      bar.className = `preview-bar intensity-${stage.intensity}`;
+      bar.style.left = `${Math.min(100, (stage.start_after_seconds / scale) * 100)}%`;
+      bar.style.width = `${Math.max(1, Math.min(100, (stage.duration_seconds / scale) * 100))}%`;
+      bar.title = `${stage.action} · ${stage.pattern} · ${stage.duration_seconds}s`;
+      track.append(bar);
+      lane.append(label, track);
+      timelinePreview.append(lane);
+    }
+  };
+
+  const updateDesigner = () => {
+    updateStageNumbers();
+    const playbook = collectPlaybook();
+    const validation = localValidation(playbook);
+    renderTimeline(playbook, validation.metrics);
+    const throttles = [];
+    if (validation.metrics.maxCount > playbook.safety.max_concurrent_actions) throttles.push(`concurrency ${validation.metrics.maxCount}→${playbook.safety.max_concurrent_actions}`);
+    if (validation.metrics.maxSeverity > playbook.safety.max_severity_points) throttles.push(`severity ${validation.metrics.maxSeverity}→${playbook.safety.max_severity_points}`);
+    field("budget-preview").textContent = `Designed peak: ${validation.metrics.maxCount} concurrent / ${validation.metrics.maxSeverity} severity${throttles.length ? ` · scheduler will throttle ${throttles.join(", ")}` : ""}`;
+    validationPanel.className = `designer-validation ${validation.errors.length ? "invalid" : throttles.length ? "warning" : "valid"}`;
+    validationPanel.textContent = validation.errors.length
+      ? validation.errors.join(" ")
+      : throttles.length
+        ? "Locally valid. Safety budgets will delay overlapping stages."
+        : "Locally valid and within designed safety budgets.";
+    return validation;
+  };
+
+  const controllerRequest = async (operation) => {
+    const playbook = collectPlaybook();
+    const local = localValidation(playbook);
+    if (local.errors.length) {
+      updateDesigner();
+      return;
+    }
+    validationPanel.className = "designer-validation checking";
+    validationPanel.textContent = `${operation === "save" ? "Saving" : "Validating"} with the scenario controller…`;
+    try {
+      const response = await fetch(`/exercises/${exerciseId}/playbooks/designer/${operation}`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(playbook),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || "Controller rejected the playbook.");
+      validationPanel.className = "designer-validation valid";
+      validationPanel.textContent = operation === "save"
+        ? "Saved. A version snapshot was created when the prior definition changed."
+        : "Controller validation passed.";
+      if (operation === "save") window.setTimeout(() => window.location.reload(), 500);
+    } catch (error) {
+      validationPanel.className = "designer-validation invalid";
+      validationPanel.textContent = error.message;
+    }
+  };
+
+  const importForm = document.querySelector("#playbook-import-form");
+  importForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const file = document.querySelector("#playbook-import-file").files[0];
+    if (!file) return;
+    validationPanel.className = "designer-validation checking";
+    validationPanel.textContent = "Importing and validating YAML…";
+    try {
+      const response = await fetch(
+        `/exercises/${exerciseId}/playbooks/import`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/yaml",
+            "X-LiveFire-Filename": file.name,
+          },
+          body: await file.text(),
+        },
+      );
+      if (!response.ok) {
+        const payload = await response.json();
+        throw new Error(payload.detail || "Playbook import failed.");
+      }
+      window.location.reload();
+    } catch (error) {
+      validationPanel.className = "designer-validation invalid";
+      validationPanel.textContent = error.message;
+    }
+  });
+
+  stageContainer.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    const target = event.target.closest(".designer-stage");
+    if (!draggedStage || !target || draggedStage === target) return;
+    const bounds = target.getBoundingClientRect();
+    if (event.clientY < bounds.top + bounds.height / 2) {
+      target.before(draggedStage);
+    } else {
+      target.after(draggedStage);
+    }
+  });
+  document.querySelectorAll(".load-playbook").forEach((button) => {
+    button.addEventListener("click", () => {
+      loadPlaybook(playbookLibrary.find((playbook) => playbook.id === button.dataset.playbookId));
+    });
+  });
+  document.querySelector("#add-stage").addEventListener("click", () => {
+    renderStage();
+    updateDesigner();
+  });
+  document.querySelector("#validate-playbook").addEventListener("click", () => controllerRequest("validate"));
+  document.querySelector("#save-playbook").addEventListener("click", () => controllerRequest("save"));
+  document.querySelector(".visual-designer").addEventListener("input", updateDesigner);
+  document.querySelector(".visual-designer").addEventListener("change", updateDesigner);
+  loadPlaybook(initialPlaybook);
+})();
+
+(() => {
+  const endpoint = "/exercises/{{ exercise.id }}/chaos/status";
+  let refreshDelay = 5000;
+  const setPill = (element, healthy, healthyText, failedText) => {
+    if (!element) return;
+    element.textContent = healthy ? healthyText : failedText;
+    element.classList.toggle("healthy", healthy);
+    element.classList.toggle("failed", !healthy);
+  };
+  const update = async () => {
+    try {
+      const response = await fetch(endpoint, {headers: {"Accept": "application/json"}});
+      if (!response.ok) return;
+      const payload = await response.json();
+      const state = payload.state || {};
+      const control = payload.control || {};
+      setPill(document.querySelector("#controller-pill"), control.reachable, "Controller online", "Controller offline");
+      setPill(document.querySelector("#target-pill"), control.ready, "Target verified", "Target not ready");
+      const revision = document.querySelector("#revision-value");
+      if (revision) revision.textContent = state.revision || 0;
+      const activeActions = state.active_actions || {};
+      const activePlaybooks = (state.playbook_runs || []).some(
+        (run) => ["running", "paused"].includes(run.status),
+      );
+      refreshDelay = Object.keys(activeActions).length || activePlaybooks
+        ? 2000
+        : 5000;
+      const activeCount = document.querySelector("#active-run-count");
+      if (activeCount) activeCount.textContent = Object.keys(activeActions).length;
+      const activeContainer = document.querySelector("#active-actions");
+      if (activeContainer) {
+        activeContainer.replaceChildren();
+        const entries = Object.entries(activeActions);
+        if (!entries.length) {
+          const empty = document.createElement("span");
+          empty.className = "pill healthy";
+          empty.textContent = "No active faults";
+          activeContainer.append(empty);
+        }
+        for (const [action, detail] of entries) {
+          const fault = document.createElement("span");
+          fault.className = "pill active";
+          fault.textContent = `${action.replaceAll("_", " ")} · ${detail.intensity || "medium"} · ${detail.pattern || "steady"}`;
+          activeContainer.append(fault);
+        }
+      }
+      const conditions = state.conditions || {};
+      document.querySelectorAll("[data-condition]").forEach((card) => {
+        const value = Number(conditions[card.dataset.condition] || 0);
+        const maximum = Number(card.dataset.maximum || 1);
+        const suffix = card.dataset.suffix || "";
+        const display = suffix === "%" ? Math.round(value * 1000) / 10 : value;
+        card.querySelector("[data-value]").textContent = `${display}${suffix}`;
+        card.querySelector("[data-bar]").style.width = `${Math.min(100, (value / maximum) * 100)}%`;
+      });
+      document.querySelectorAll("[data-condition-flag]").forEach((card) => {
+        const active = Boolean(conditions[card.dataset.conditionFlag]);
+        card.classList.toggle("active", active);
+        card.querySelector("[data-value]").textContent = active ? "active" : "clear";
+      });
+      const dependencies = payload.dependencies || {};
+      const dependencyStatus = document.querySelector("#dependency-map-status");
+      if (dependencyStatus) {
+        dependencyStatus.textContent = dependencies.reachable
+          ? "Live target status"
+          : "Designed topology";
+        dependencyStatus.classList.toggle("healthy", Boolean(dependencies.reachable));
+      }
+      for (const dependency of dependencies.dependencies || []) {
+        const node = document.querySelector(
+          `[data-dependency-id="${CSS.escape(dependency.id)}"]`,
+        );
+        if (!node) continue;
+        node.classList.toggle("degraded", dependency.status === "degraded");
+        node.querySelector("[data-dependency-status]").textContent = dependency.status;
+      }
+      for (const run of state.playbook_runs || []) {
+        const runElement = document.querySelector(`[data-playbook-run="${CSS.escape(run.id)}"]`);
+        if (!runElement) continue;
+        const status = runElement.querySelector("[data-playbook-status]");
+        status.textContent = run.status;
+        status.className = `run-status ${run.status}`;
+        for (const stage of run.stages || []) {
+          const stageElement = runElement.querySelector(`[data-stage="${CSS.escape(stage.id)}"]`);
+          if (!stageElement) continue;
+          stageElement.className = `timeline-stage ${stage.status}`;
+          const waiting = stage.waiting_reason ? ` · ${stage.waiting_reason.replaceAll("_", " ")}` : "";
+          stageElement.querySelector("[data-stage-status]").textContent = `${stage.status}${waiting}`;
+        }
+      }
+    } catch (_) {
+      refreshDelay = 10000;
+      setPill(document.querySelector("#controller-pill"), false, "", "Controller offline");
+    } finally {
+      window.setTimeout(update, refreshDelay);
+    }
+  };
+  window.setTimeout(update, refreshDelay);
+})();
+</script>
 {% endblock %}

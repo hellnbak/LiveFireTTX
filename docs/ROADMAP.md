@@ -1,68 +1,83 @@
 # Roadmap
 
-## v0.1 MVP
+## Released Foundation
 
-- Local FastAPI app
-- Scenario builder
-- Scenario-specific generated packages
-- Local Docker Compose target environment
-- Safe chaos scripts
-- Manual facilitator inject console
-- Run log
-- After-action report template
+### v0.1–v0.3
 
-## v0.2 Safe chaos control
+- Local scenario builder and generated Docker target
+- Scenario-scoped safe chaos API and CLI
+- Reversible actions, bounded duration, preflight, guardrails, and emergency stop
+- Lifecycle evidence and target-side expiration
 
-- Scenario-scoped chaos control API and CLI
-- Low, medium, and high intensity profiles
-- Reversible state with per-action and full reset
-- Repeatable chaos actions from the facilitator console
-- Live chaos state and execution count in the console
-- Target endpoints that react to simulated conditions
-- Localhost-only generated service bindings
-- Automated smoke tests for every generated scenario package
+### v0.4 Chaos Orchestration Studio
 
-## v0.3 Guarded chaos runs
+- Multi-stage playbooks, scheduling, safety budgets, and health gates
+- Pause, resume, skip, stop, and deterministic replay
+- Steady, ramp, burst, flap, and seeded jitter patterns
+- Live telemetry and validated YAML configuration
 
-- Target and controller preflight checks
-- Bounded run durations with automatic rollback
-- Pending, active, completed, aborted, and failed lifecycle states
-- Strict, standard, and observe guardrail profiles
-- Latency, error-rate, availability, and exercise-identity stop conditions
-- Before/after and periodic target observations
-- Facilitator emergency stop
-- Target-side expiration when the controller is unavailable
+### v0.5 Exercise Intelligence
 
-## Next: v0.4 chaos orchestration
+- Objective rubric, evidence notes, and explainable readiness signals
+- Run comparisons and observed-impact charts
+- Markdown, CSV, JSON, state, and manifest evidence export
+- Generated after-action reports
 
-- Multi-step chaos sequences and saved playbooks
-- Timer-based inject and action scheduling
-- Playbook pause, resume, skip, and emergency-stop controls
-- Health-gated transitions between playbook stages
-- Scenario-specific reusable playbook templates
-- Richer observed-impact charts and telemetry
-- Facilitator-defined safe artifact injects
-- Additional simulated service dependencies
+### v0.6 Scenario Design Studio
 
-## Near-term exercise workflow
+- Drag-and-drop playbook builder with timeline preview
+- Template clone, import/export, validation, and version history
+- Facilitator-defined watermarked artifact injects
+- Local cycle, ID, timing, and safety-budget checks
 
-- Export run logs to Markdown/CSV
-- Better scenario templates
-- Exercise scoring rubric
-- Role-specific participant views
-- Built-in sample data sets
-- Improved UI and branding
+## v1.0 Complete
 
-## Cloud / enterprise
+### Dependency Realism
 
-- AWS Terraform renderer
-- AWS Fault Injection Service renderer
-- Kubernetes / Helm renderer
-- Azure Chaos Studio renderer
-- Slack and Teams inject delivery
-- Jira and ServiceNow ticket injects
-- SIEM and EDR synthetic alert connectors
-- Multi-user authentication
-- Organization/workspace support
-- Versioned scenario library
-- Evidence package export
+- Simulated payment processor failures
+- Queue backlog and delayed consumers
+- Object-storage throttling and stale reads
+- Third-party API degradation and retry pressure
+- Observability gaps and delayed synthetic telemetry
+- Live cross-service dependency maps
+
+### Exercise Workflow
+
+- Guided scenario presets
+- Critical dependency cascade scenario
+- Recommended role and objective profiles
+- Role-specific participant briefs
+- Facilitator readiness checklist
+- Built-in sample orders, dependencies, and communications
+- Improved setup and command-center interface
+
+### Release Hardening
+
+- Environment-driven local configuration
+- Versioned SQLite migrations, integrity checks, WAL, and foreign keys
+- Versioned backup and guarded restore tooling
+- Application health and readiness endpoints
+- Structured request logs and defensive response headers
+- Installable Python package and local application container
+- Router separation for system and package endpoints
+- CI across Python 3.11–3.13, mypy, lint, coverage, CodeQL, package builds,
+  and generated Docker lifecycle smoke tests
+- Upgrade, configuration, threat-model, and release-checklist documentation
+
+## Next: v1.1
+
+- Facilitator clock, scheduled narrative injects, and exercise pause/resume
+- Scenario-pack import/export independent of generated exercise instances
+- More detailed role permissions and observer-only views
+- Signed evidence manifests and configurable retention
+- Browser-driven accessibility and end-to-end UI regression tests
+
+## Future Cloud and Enterprise
+
+- AWS Terraform and Fault Injection Service renderers
+- Kubernetes / Helm and Azure Chaos Studio renderers
+- Slack, Teams, Jira, ServiceNow, SIEM, and EDR connectors
+- Multi-user authentication and organization workspaces
+- Shared versioned scenario library
+
+Cloud and enterprise work does not weaken the v1.0 local safety boundary.

@@ -1,157 +1,185 @@
 # LiveFireTTX
 
-LiveFireTTX is a local-first application for building and running live-fire tabletop exercises. It helps facilitators generate a scenario-specific target environment, a safe chaos control plane, inject options, exercise artifacts, and a web console where the tabletop leader can steer the exercise.
+LiveFireTTX is a safe, local-first platform for designing and running live-fire
+tabletop exercises. It generates a scenario-specific target, a guarded chaos
+control plane, facilitator injects, participant materials, sample data, and an
+evidence-ready command center.
 
-> **Status:** v0.3 prototype. Use only in controlled lab environments.
+> **Status:** v1.0.0. Run only in controlled lab environments.
 
-## What it does
+## Highlights
 
-- Creates tabletop and live-fire exercises from guided scenario inputs
-- Generates a structured exercise package for each run
-- Builds a local Docker Compose target environment
-- Builds a scenario-scoped chaos API and CLI for controlled simulation
-- Provides a facilitator inject console
-- Runs target preflight checks before every guarded chaos action
-- Lets the exercise leader choose intensity, duration, and guardrail profile
-- Automatically rolls back expired actions or runs that exceed stop conditions
-- Provides reset and emergency-stop controls
-- Makes the generated target respond to latency, error, auth, DNS, backup, build, and data-integrity conditions
-- Supports multiple inject/chaos options per exercise stage
-- Logs facilitator actions, inject triggers, and manual notes
-- Generates after-action report templates
+- Guided scenario packs with recommended roles, objectives, dependencies, and timing
+- Local Docker Compose target and scenario-scoped chaos controller
+- Payment, queue, object-storage, vendor API, telemetry, DNS, identity, backup,
+  data-integrity, build, file-impact, EDR, and application simulations
+- Low, medium, and high intensity with steady, ramp, burst, flap, and seeded
+  jitter patterns
+- Bounded durations, target preflight, safety budgets, emergency stop, and
+  automatic rollback
+- Visual playbook design, timeline preview, YAML fallback, version history,
+  import/export, cloning, and deterministic replay
+- Live dependency map, condition telemetry, and run lifecycle evidence
+- Role-specific participant briefs, facilitator checklist, and sample data
+- Safe watermarked artifact injects
+- Objective scoring, run comparison, after-action reports, and ZIP evidence export
+- Versioned SQLite migrations plus local backup and restore tooling
+- Installable Python package, application container, CI, CodeQL, and Docker
+  release smoke testing
 
-## Supported starter scenarios
+## Supported scenarios
 
 - Ransomware / business interruption
 - Cloud or regional service outage
 - Supply-chain / dependency compromise
 - Database corruption / restore failure
 - Identity provider outage
+- Critical dependency cascade
 
-## Safety model
-
-LiveFireTTX is designed for safe simulation. It does **not** generate malware, credential theft tooling, exploit chains, persistence, evasion, destructive payloads, anti-forensics, or real-world unauthorized access tooling.
-
-Chaos actions in this MVP create synthetic artifacts, local state changes, fake alerts, safe test-file renames, simulated service degradation, and report files. They are intended to create realistic exercise pressure without unsafe behavior.
-
-See [docs/SAFETY.md](docs/SAFETY.md).
-
-## Quick start
+## Quick Start
 
 Requirements:
 
 - Python 3.11+
-- Docker Desktop, if you want to run generated local target environments
+- Docker Desktop or Docker Engine with Compose
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e .
 uvicorn app.main:app --reload
 ```
 
-Open:
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000).
 
-```text
-http://127.0.0.1:8000
-```
-
-## Create and run an exercise
-
-1. Open the web UI.
-2. Click **New Exercise**.
-3. Choose a scenario type and fill in the business system, participants, duration, and objectives.
-4. Click **Generate Exercise**.
-5. Open the exercise console.
-6. Trigger narrative injects or chaos actions manually from the facilitator console.
-7. Add facilitator notes as the team makes decisions.
-8. Download the generated exercise package.
-
-Generated packages are created under:
-
-```text
-generated/exercises/<exercise-id>/
-```
-
-Deploy the generated local target environment:
+Containerized startup:
 
 ```bash
-cd generated/exercises/<exercise-id>/target
-./deploy.sh
+docker compose up -d --build
 ```
 
-Open the mock target app:
+The application container binds only to `127.0.0.1:8000` and stores local data
+in the managed `livefirettx-data` Docker volume. Set
+`LIVEFIRE_APP_HOST_PORT` when port `8000` is already in use.
 
-```text
-http://127.0.0.1:8088
-```
+Download a generated exercise package from the interface, unpack it on the
+host, and run its `target/deploy.sh`. The Compose configuration lets the
+facilitator container reach that host controller through the explicit
+`host.docker.internal` bridge while the browser-facing ports remain bound to
+localhost.
 
-Open the safe chaos control API:
+## Run an Exercise
 
-```text
-http://127.0.0.1:8090/docs
-```
+1. Select a scenario pack and review its dependency map.
+2. Tailor the business system, duration, roles, and objectives.
+3. Generate the exercise and review role briefs and sample data.
+4. Deploy the generated target:
 
-The same scenario-scoped controls are available from the generated package:
+   ```bash
+   cd generated/exercises/<exercise-id>/target
+   ./deploy.sh
+   ./validate.sh
+   ```
+
+5. Use the facilitator command center or generated CLI:
+
+   ```bash
+   cd generated/exercises/<exercise-id>/chaos
+   python3 chaos_cli.py list
+   python3 chaos_cli.py preflight
+   python3 chaos_cli.py run payment_failure --intensity medium --pattern burst --duration 300
+   python3 chaos_cli.py state
+   python3 chaos_cli.py reset
+   ```
+
+6. Stop active runs, assess objectives, and download the evidence package.
+7. Clean up:
+
+   ```bash
+   cd generated/exercises/<exercise-id>/cleanup
+   ./destroy.sh
+   ```
+
+Generated services:
+
+- Target: [http://127.0.0.1:8088](http://127.0.0.1:8088)
+- Chaos API: [http://127.0.0.1:8090/docs](http://127.0.0.1:8090/docs)
+
+Set `LIVEFIRE_TARGET_HOST_PORT` or `LIVEFIRE_CONTROL_HOST_PORT` before
+deployment when the default host ports are already in use.
+
+## Configuration
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `LIVEFIRE_DATA_ROOT` | `~/.livefirettx` | Base directory for persistent local data |
+| `LIVEFIRE_DATABASE_PATH` | `<data-root>/livefirettx.db` | SQLite application database |
+| `LIVEFIRE_GENERATED_ROOT` | `<data-root>/generated/exercises` | Generated exercise packages |
+| `LIVEFIRE_BACKUP_ROOT` | `<data-root>/backups` | CLI backup destination |
+| `LIVEFIRE_CONTROL_URL` | `http://127.0.0.1:8090` | Local chaos controller |
+| `LIVEFIRE_ALLOW_CONTAINER_HOST` | `false` | Permit the exact container-to-host bridge |
+| `LIVEFIRE_REQUEST_TIMEOUT_SECONDS` | `3` | Controller request timeout |
+
+The control URL must remain on loopback unless the container-only
+`host.docker.internal` bridge is explicitly enabled. See
+[`docs/CONFIGURATION.md`](docs/CONFIGURATION.md).
+
+## Backup and Restore
+
+Download a backup from the home screen or use the local administration CLI:
 
 ```bash
-cd generated/exercises/<exercise-id>/chaos
-python3 chaos_cli.py list
-python3 chaos_cli.py preflight
-python3 chaos_cli.py run app_degradation --intensity medium --duration 300
-python3 chaos_cli.py state
-python3 chaos_cli.py stop
+livefirettx doctor
+livefirettx backup
+livefirettx inspect-backup backups/livefirettx-<timestamp>.zip
+livefirettx restore backups/livefirettx-<timestamp>.zip --confirm
 ```
 
-Cleanup:
+Stop the application before restoring. Archives contain the SQLite snapshot,
+generated exercise packages, and a versioned manifest.
+
+## Development and Release Gates
 
 ```bash
-cd generated/exercises/<exercise-id>/cleanup
-./destroy.sh
+pip install -r requirements-dev.txt
+make test
+make release-check
+make app-container-smoke
+make docker-smoke
 ```
 
-## Repository layout
+`make release-check` runs linting, Python compilation, mypy, service coverage,
+application smoke checks, dependency and secret scanning, and package builds.
+GitHub Actions repeats these checks on Python 3.11, 3.12, and 3.13. The Docker
+gate generates a critical
+dependency exercise, deploys both generated services, validates them, applies
+and resets a bounded fault, and tears the environment down.
 
-```text
-app/
-  main.py                  # FastAPI app and routes
-  models.py                # Scenario library, dataclasses, SQLite persistence
-  services/generator.py    # Exercise and inject generation
-  services/lab_renderer.py # Target and safe chaos control-plane rendering
-  services/runtime.py      # Validated local chaos execution
-  templates/               # Jinja2 UI templates and CSS
-docs/
-  ARCHITECTURE.md
-  SAFETY.md
-  ROADMAP.md
-examples/
-  scenario-input-example.yml
-.github/workflows/
-  ci.yml
-LICENSE
-NOTICE
-README.md
-requirements.txt
-```
+## Safety
 
-## Architecture
+LiveFireTTX simulates symptoms and operational pressure. It does not generate
+malware, credential theft, exploit chains, persistence, evasion,
+anti-forensics, destructive payloads, or unauthorized access tooling.
 
-```text
-Scenario Builder
-  -> Scenario Definition
-  -> Target Environment Generator
-  -> Safe Chaos API / CLI
-  -> Facilitator Inject Console
-  -> Run Log
-  -> After-Action Report Template
-```
+Generated actions modify synthetic state and package-contained artifacts only.
+Review [`docs/SAFETY.md`](docs/SAFETY.md) and
+[`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) before operation.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+## Documentation
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)
+- [`docs/ROADMAP.md`](docs/ROADMAP.md)
+- [`docs/SAFETY.md`](docs/SAFETY.md)
+- [`docs/SECURITY_EXCEPTIONS.md`](docs/SECURITY_EXCEPTIONS.md)
+- [`docs/UPGRADING.md`](docs/UPGRADING.md)
+- [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md)
 
 ## License
 
-LiveFireTTX is licensed under the Functional Source License, Version 1.1, ALv2 Future License (`FSL-1.1-ALv2`).
+LiveFireTTX is licensed under the Functional Source License, Version 1.1, ALv2
+Future License (`FSL-1.1-ALv2`).
 
 Copyright (c) 2026 Steve Manzuik.
 
-See [LICENSE](LICENSE)
+See [`LICENSE`](LICENSE).

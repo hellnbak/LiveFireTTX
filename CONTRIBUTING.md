@@ -2,14 +2,17 @@
 
 Thanks for your interest in LiveFireTTX.
 
-This project is an MVP. Contributions should preserve the safety model: simulate symptoms and operational pressure, but do not add malware, exploit tooling, credential theft, persistence, evasion, anti-forensics, or destructive behavior.
+Contributions must preserve the v1 safety contract: simulate symptoms and
+operational pressure, but do not add malware, exploit tooling, credential theft,
+persistence, evasion, anti-forensics, or destructive behavior.
 
 ## Development setup
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
+pip install -e .
 uvicorn app.main:app --reload
 ```
 
@@ -20,3 +23,5 @@ uvicorn app.main:app --reload
 - Include cleanup behavior for generated environments.
 - Do not commit generated exercise packages, local databases, secrets, or logs.
 - Update docs when changing user-facing behavior.
+- Add tests for migrations, generated packages, safety boundaries, and routes.
+- Run `make release-check` before opening a pull request.

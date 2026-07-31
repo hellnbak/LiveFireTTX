@@ -8,12 +8,14 @@ import urllib.error
 import urllib.request
 
 from engine import (
+    PATTERNS,
     abort,
     activate_run,
     available_actions,
     begin_run,
     fail_run,
     get_state,
+    list_playbooks,
     observe_run,
     reset,
 )
@@ -53,6 +55,8 @@ def run_action(args):
             "max_error_rate": args.max_error_rate,
             "abort_on_target_unreachable": not args.allow_target_unreachable,
         },
+        pattern=args.pattern,
+        seed=args.seed,
     )
     snapshot = target_snapshot()
     if args.skip_preflight:
@@ -70,9 +74,12 @@ def run_action(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="LiveFireTTX guarded chaos control")
+    parser = argparse.ArgumentParser(
+        description="LiveFireTTX chaos orchestration control"
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("list", help="List scenario-scoped actions")
+    commands.add_parser("playbooks", help="List configured playbooks")
     commands.add_parser("state", help="Show current state and run lifecycle")
     commands.add_parser("preflight", help="Check the generated target")
 
@@ -84,6 +91,12 @@ def main():
         default="medium",
     )
     run_parser.add_argument("--duration", type=int, default=300)
+    run_parser.add_argument(
+        "--pattern",
+        choices=sorted(PATTERNS),
+        default="steady",
+    )
+    run_parser.add_argument("--seed", type=int)
     run_parser.add_argument("--max-latency-ms", type=int, default=5000)
     run_parser.add_argument("--max-error-rate", type=float, default=0.5)
     run_parser.add_argument("--allow-target-unreachable", action="store_true")
@@ -101,7 +114,12 @@ def main():
 
     try:
         if args.command == "list":
-            result = {"actions": available_actions()}
+            result = {
+                "actions": available_actions(),
+                "patterns": sorted(PATTERNS),
+            }
+        elif args.command == "playbooks":
+            result = {"playbooks": list_playbooks()}
         elif args.command == "state":
             result = get_state()
         elif args.command == "preflight":

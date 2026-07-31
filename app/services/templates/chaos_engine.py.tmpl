@@ -1,8 +1,11 @@
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import copy
 import json
 import os
+import random
+import re
 import uuid
 
 try:
@@ -11,7 +14,7 @@ except ImportError:
     fcntl = None
 
 
-CONTROL_VERSION = "0.3.0"
+CONTROL_VERSION = "1.0.0"
 ROOT = Path(__file__).resolve().parent
 STATE_DIR = Path(os.environ.get("LIVEFIRE_STATE_DIR", ROOT / "state"))
 ARTIFACTS_DIR = Path(
@@ -20,10 +23,32 @@ ARTIFACTS_DIR = Path(
 STATE_PATH = STATE_DIR / "state.json"
 LOCK_PATH = STATE_DIR / "state.lock"
 ALLOWED_ACTIONS = set(__ALLOWED_ACTIONS__)
+DEFAULT_PLAYBOOKS = __DEFAULT_PLAYBOOKS__
+PATTERNS = {"steady", "ramp", "burst", "flap", "jitter"}
+TERMINAL_RUN_STATUSES = {"completed", "aborted", "failed"}
+TERMINAL_STAGE_STATUSES = {"completed", "aborted", "failed", "skipped"}
 INTENSITY_PROFILES = {
     "low": {"rate": 0.2, "latency_ms": 400, "error_rate": 0.02, "count": 3},
     "medium": {"rate": 0.6, "latency_ms": 1500, "error_rate": 0.15, "count": 6},
     "high": {"rate": 1.0, "latency_ms": 3000, "error_rate": 0.4, "count": 10},
+}
+SEVERITY_POINTS = {"low": 1, "medium": 2, "high": 3}
+GUARDRAIL_PROFILES = {
+    "strict": {
+        "max_latency_ms": 2500,
+        "max_error_rate": 0.25,
+        "abort_on_target_unreachable": True,
+    },
+    "standard": {
+        "max_latency_ms": 5000,
+        "max_error_rate": 0.5,
+        "abort_on_target_unreachable": True,
+    },
+    "observe": {
+        "max_latency_ms": 10000,
+        "max_error_rate": 1.0,
+        "abort_on_target_unreachable": False,
+    },
 }
 ACTION_CATALOG = {
     "app_degradation": {
@@ -56,6 +81,21 @@ ACTION_CATALOG = {
         "description": "Makes the simulated DNS dependency fail at a controlled rate.",
         "reversible": True,
     },
+    "object_storage_throttle": {
+        "label": "Object Storage Throttling",
+        "description": "Adds synthetic throttling and stale reads to local object storage.",
+        "reversible": True,
+    },
+    "payment_failure": {
+        "label": "Payment Processor Failure",
+        "description": "Makes simulated payment authorization fail at a controlled rate.",
+        "reversible": True,
+    },
+    "queue_backlog": {
+        "label": "Queue Backlog",
+        "description": "Builds a synthetic backlog and delays the local consumer.",
+        "reversible": True,
+    },
     "safe_file_impact": {
         "label": "Safe File Impact",
         "description": "Renames generated test files and creates a simulated note.",
@@ -64,6 +104,16 @@ ACTION_CATALOG = {
     "synthetic_edr_alert": {
         "label": "Synthetic EDR Alerts",
         "description": "Creates safe alerts without executing malicious behavior.",
+        "reversible": True,
+    },
+    "telemetry_gap": {
+        "label": "Observability Gap",
+        "description": "Delays or drops simulated telemetry without hiding real activity.",
+        "reversible": True,
+    },
+    "third_party_degradation": {
+        "label": "Third-Party API Degradation",
+        "description": "Adds controlled vendor API failures and rate-limit responses.",
         "reversible": True,
     },
 }
@@ -76,6 +126,15 @@ DEFAULT_CONDITIONS = {
     "backup_delay": False,
     "build_blocked": False,
     "file_impact": False,
+    "object_storage_throttle_rate": 0.0,
+    "payment_failure_rate": 0.0,
+    "queue_backlog_depth": 0,
+    "queue_consumer_delay_ms": 0,
+    "stale_read_rate": 0.0,
+    "telemetry_delay_seconds": 0,
+    "telemetry_gap_rate": 0.0,
+    "third_party_error_rate": 0.0,
+    "third_party_retry_after_seconds": 0,
 }
 ACTION_FIELDS = {
     "app_degradation": ("latency_ms", "error_rate"),
@@ -84,8 +143,19 @@ ACTION_FIELDS = {
     "data_corruption": ("data_integrity",),
     "dependency_alert": ("build_blocked",),
     "dns_failure": ("dns_failure_rate",),
+    "object_storage_throttle": (
+        "object_storage_throttle_rate",
+        "stale_read_rate",
+    ),
+    "payment_failure": ("payment_failure_rate",),
+    "queue_backlog": ("queue_backlog_depth", "queue_consumer_delay_ms"),
     "safe_file_impact": ("file_impact",),
     "synthetic_edr_alert": (),
+    "telemetry_gap": ("telemetry_delay_seconds", "telemetry_gap_rate"),
+    "third_party_degradation": (
+        "third_party_error_rate",
+        "third_party_retry_after_seconds",
+    ),
 }
 
 
@@ -100,13 +170,15 @@ def parse_timestamp(value):
 
 def default_state():
     return {
-        "schema_version": 3,
+        "schema_version": 5,
         "control_version": CONTROL_VERSION,
         "revision": 0,
         "updated_at": timestamp(),
         "active_actions": {},
         "conditions": dict(DEFAULT_CONDITIONS),
         "runs": [],
+        "playbooks": copy.deepcopy(DEFAULT_PLAYBOOKS),
+        "playbook_runs": [],
         "history": [],
     }
 
@@ -129,12 +201,14 @@ def normalize_state(state):
     }
     state.setdefault("active_actions", {})
     state.setdefault("runs", [])
+    if "playbooks" not in state:
+        state["playbooks"] = copy.deepcopy(DEFAULT_PLAYBOOKS)
+    state.setdefault("playbook_runs", [])
     state.setdefault("history", [])
     state.setdefault("revision", 0)
     state.setdefault("updated_at", timestamp())
-    state["schema_version"] = 3
+    state["schema_version"] = 5
     state["control_version"] = CONTROL_VERSION
-
     known_run_ids = {run.get("id") for run in state["runs"]}
     for action, active in state["active_actions"].items():
         active.setdefault("run_id", f"legacy_{action}")
@@ -142,22 +216,27 @@ def normalize_state(state):
         active.setdefault("duration_seconds", None)
         active.setdefault("expires_at", None)
         active.setdefault("stop_conditions", {})
+        active.setdefault("pattern", "steady")
+        active.setdefault("seed", 0)
         active.setdefault(
-            "effect",
+            "base_effect",
             {
                 field: state["conditions"].get(field, DEFAULT_CONDITIONS[field])
                 for field in ACTION_FIELDS.get(action, ())
             },
         )
+        active.setdefault("effect", dict(active["base_effect"]))
         if active["run_id"] not in known_run_ids:
             state["runs"].append(
                 {
                     "id": active["run_id"],
                     "action": action,
                     "intensity": active.get("intensity", "medium"),
+                    "pattern": active["pattern"],
+                    "seed": active["seed"],
                     "status": "active",
-                    "requested_at": active.get("applied_at", state["updated_at"]),
-                    "started_at": active.get("applied_at", state["updated_at"]),
+                    "requested_at": active.get("started_at", state["updated_at"]),
+                    "started_at": active.get("started_at", state["updated_at"]),
                     "duration_seconds": active.get("duration_seconds"),
                     "expires_at": active.get("expires_at"),
                     "stop_conditions": active.get("stop_conditions", {}),
@@ -165,7 +244,8 @@ def normalize_state(state):
                     "observations": [],
                 }
             )
-    state["runs"] = state["runs"][-100:]
+    state["runs"] = state["runs"][-200:]
+    state["playbook_runs"] = state["playbook_runs"][-50:]
     return state
 
 
@@ -209,7 +289,9 @@ def available_actions():
 def get_state():
     with state_lock():
         state = read_state_unlocked()
-        if reconcile_expired_unlocked(state):
+        changed = reconcile_expired_unlocked(state)
+        changed = sync_playbook_runs_unlocked(state) or changed
+        if changed:
             commit_state(state)
         return state
 
@@ -219,12 +301,24 @@ def begin_run(
     intensity="medium",
     duration_seconds=300,
     stop_conditions=None,
+    pattern="steady",
+    seed=None,
+    playbook_run_id=None,
+    stage_id=None,
 ):
-    validate_request(action, intensity, duration_seconds, stop_conditions or {})
+    validate_request(
+        action,
+        intensity,
+        duration_seconds,
+        stop_conditions or {},
+        pattern,
+    )
     run = {
         "id": f"run_{uuid.uuid4().hex[:12]}",
         "action": action,
         "intensity": intensity,
+        "pattern": pattern,
+        "seed": int(seed if seed is not None else random.SystemRandom().randint(1, 2**31)),
         "status": "pending",
         "requested_at": timestamp(),
         "duration_seconds": int(duration_seconds),
@@ -232,10 +326,12 @@ def begin_run(
         "stop_conditions": normalize_stop_conditions(stop_conditions or {}),
         "artifacts": [],
         "observations": [],
+        "playbook_run_id": playbook_run_id,
+        "stage_id": stage_id,
     }
     with state_lock():
         state = read_state_unlocked()
-        state["runs"] = (state["runs"] + [run])[-100:]
+        state["runs"] = (state["runs"] + [run])[-200:]
         commit_state(state)
     return run
 
@@ -257,10 +353,18 @@ def activate_run(run_id, before_snapshot=None):
             )
 
         profile = INTENSITY_PROFILES[run["intensity"]]
-        effect = effect_for(action, profile)
+        base_effect = effect_for(action, profile)
         artifacts = create_artifacts(action, run["intensity"], profile)
         started_at = datetime.now(timezone.utc)
         expires_at = started_at + timedelta(seconds=run["duration_seconds"])
+        multiplier = pattern_multiplier(
+            run["pattern"],
+            0,
+            run["duration_seconds"],
+            run["seed"],
+            run["id"],
+        )
+        effect = scale_effect(base_effect, multiplier)
         run.update(
             {
                 "status": "active",
@@ -268,18 +372,25 @@ def activate_run(run_id, before_snapshot=None):
                 "expires_at": timestamp(expires_at),
                 "before_snapshot": before_snapshot,
                 "artifacts": artifacts,
+                "current_multiplier": multiplier,
             }
         )
         state["active_actions"][action] = {
             "run_id": run_id,
             "action": action,
             "intensity": run["intensity"],
+            "pattern": run["pattern"],
+            "seed": run["seed"],
             "started_at": run["started_at"],
             "duration_seconds": run["duration_seconds"],
             "expires_at": run["expires_at"],
             "stop_conditions": run["stop_conditions"],
+            "base_effect": base_effect,
             "effect": effect,
+            "current_multiplier": multiplier,
             "artifacts": artifacts,
+            "playbook_run_id": run.get("playbook_run_id"),
+            "stage_id": run.get("stage_id"),
         }
         recompute_conditions(state)
         commit_state(state)
@@ -300,6 +411,7 @@ def fail_run(run_id, reason, snapshot=None):
                 "before_snapshot": snapshot,
             }
         )
+        sync_playbook_runs_unlocked(state)
         commit_state(state)
         return run
 
@@ -313,7 +425,7 @@ def observe_run(run_id, phase, snapshot):
             "at": timestamp(),
             "snapshot": snapshot,
         }
-        run["observations"] = (run.get("observations", []) + [observation])[-20:]
+        run["observations"] = (run.get("observations", []) + [observation])[-30:]
         active = state["active_actions"].get(run["action"])
         if active and active.get("run_id") == run_id:
             active["last_observation"] = observation
@@ -321,11 +433,73 @@ def observe_run(run_id, phase, snapshot):
         return observation
 
 
+def update_patterns(now=None):
+    current = parse_timestamp(now) if isinstance(now, str) else now
+    current = current or datetime.now(timezone.utc)
+    with state_lock():
+        state = read_state_unlocked()
+        changed = reconcile_expired_unlocked(state, current)
+        for action, active in state["active_actions"].items():
+            elapsed = max(
+                0,
+                (current - parse_timestamp(active["started_at"])).total_seconds(),
+            )
+            multiplier = pattern_multiplier(
+                active.get("pattern", "steady"),
+                elapsed,
+                active.get("duration_seconds") or 300,
+                active.get("seed", 0),
+                active["run_id"],
+            )
+            effect = scale_effect(active.get("base_effect", {}), multiplier)
+            if effect != active.get("effect"):
+                active["effect"] = effect
+                active["current_multiplier"] = multiplier
+                run = find_run(state, active["run_id"])
+                run["current_multiplier"] = multiplier
+                changed = True
+        if changed:
+            recompute_conditions(state)
+            commit_state(state)
+        return state
+
+
+def pattern_multiplier(pattern, elapsed_seconds, duration_seconds, seed, run_id):
+    if pattern == "steady":
+        return 1.0
+    if pattern == "ramp":
+        ramp_window = max(1, duration_seconds * 0.6)
+        return round(min(1.0, elapsed_seconds / ramp_window), 4)
+    if pattern == "burst":
+        return 1.0 if elapsed_seconds % 20 < 5 else 0.0
+    if pattern == "flap":
+        return 1.0 if int(elapsed_seconds / 10) % 2 == 0 else 0.0
+    if pattern == "jitter":
+        bucket = int(elapsed_seconds / 5)
+        generator = random.Random(f"{seed}:{run_id}:{bucket}")
+        return round(generator.uniform(0.25, 1.0), 4)
+    raise ValueError(f"Unsupported pattern: {pattern}")
+
+
+def scale_effect(base_effect, multiplier):
+    effect = {}
+    for field, value in base_effect.items():
+        if isinstance(value, bool):
+            effect[field] = value and multiplier >= 0.5
+        elif isinstance(value, int):
+            effect[field] = round(value * multiplier)
+        else:
+            effect[field] = round(value * multiplier, 4)
+    return effect
+
+
 def reconcile_expired(now=None):
     current = parse_timestamp(now) if isinstance(now, str) else now
     with state_lock():
         state = read_state_unlocked()
-        if reconcile_expired_unlocked(state, current):
+        changed = reconcile_expired_unlocked(state, current)
+        changed = sync_playbook_runs_unlocked(state) or changed
+        if changed:
             commit_state(state)
         return state
 
@@ -346,11 +520,13 @@ def reconcile_expired_unlocked(state, now=None):
 
 
 def abort(action=None, reason="manual_stop"):
+    if action is None:
+        return stop_all(reason)
     if action and (action not in ALLOWED_ACTIONS or action not in ACTION_CATALOG):
         raise ValueError(f"Action is not available for this exercise: {action}")
     with state_lock():
         state = read_state_unlocked()
-        selected = [action] if action else list(state["active_actions"])
+        selected = [action]
         stopped = []
         for active_action in selected:
             if active_action in state["active_actions"]:
@@ -362,6 +538,7 @@ def abort(action=None, reason="manual_stop"):
                 )
                 stopped.append(active_action)
         recompute_conditions(state)
+        sync_playbook_runs_unlocked(state)
         state["last_stop"] = {
             "at": timestamp(),
             "reason": reason,
@@ -377,17 +554,51 @@ def abort(action=None, reason="manual_stop"):
         }
 
 
+def stop_all(reason="manual_stop"):
+    with state_lock():
+        state = read_state_unlocked()
+        stopped = set(state["active_actions"])
+        for playbook_run in state["playbook_runs"]:
+            if playbook_run["status"] in {"running", "paused"}:
+                stop_playbook_unlocked(state, playbook_run, reason)
+        for action in list(state["active_actions"]):
+            finish_active_unlocked(state, action, "aborted", reason)
+            stopped.add(action)
+        recompute_conditions(state)
+        state["last_stop"] = {
+            "at": timestamp(),
+            "reason": reason,
+            "actions": sorted(stopped),
+        }
+        commit_state(state)
+        return {
+            "ok": True,
+            "stopped": sorted(stopped),
+            "reason": reason,
+            "revision": state["revision"],
+            "conditions": state["conditions"],
+        }
+
+
 def reset(action=None):
     result = abort(action, "manual_reset")
     result["reset"] = action or "all"
     return result
 
 
-def validate_request(action, intensity, duration_seconds, stop_conditions):
+def validate_request(
+    action,
+    intensity,
+    duration_seconds,
+    stop_conditions,
+    pattern="steady",
+):
     if action not in ALLOWED_ACTIONS or action not in ACTION_CATALOG:
         raise ValueError(f"Action is not available for this exercise: {action}")
     if intensity not in INTENSITY_PROFILES:
         raise ValueError(f"Unsupported intensity: {intensity}")
+    if pattern not in PATTERNS:
+        raise ValueError(f"Unsupported pattern: {pattern}")
     if not 15 <= int(duration_seconds) <= 3600:
         raise ValueError("Duration must be between 15 and 3600 seconds")
     normalize_stop_conditions(stop_conditions)
@@ -419,8 +630,25 @@ def effect_for(action, profile):
         "data_corruption": {"data_integrity": True},
         "dependency_alert": {"build_blocked": True},
         "dns_failure": {"dns_failure_rate": profile["rate"]},
+        "object_storage_throttle": {
+            "object_storage_throttle_rate": profile["rate"],
+            "stale_read_rate": profile["error_rate"],
+        },
+        "payment_failure": {"payment_failure_rate": profile["rate"]},
+        "queue_backlog": {
+            "queue_backlog_depth": profile["count"] * 100,
+            "queue_consumer_delay_ms": profile["latency_ms"],
+        },
         "safe_file_impact": {"file_impact": True},
         "synthetic_edr_alert": {},
+        "telemetry_gap": {
+            "telemetry_delay_seconds": profile["count"] * 15,
+            "telemetry_gap_rate": profile["error_rate"],
+        },
+        "third_party_degradation": {
+            "third_party_error_rate": profile["rate"],
+            "third_party_retry_after_seconds": profile["count"] * 3,
+        },
     }
     return effects[action]
 
@@ -447,6 +675,7 @@ def finish_active_unlocked(state, action, status, reason):
             "status": status,
             "ended_at": timestamp(),
             "reason": reason,
+            "current_multiplier": 0,
         }
     )
 
@@ -461,7 +690,8 @@ def find_run(state, run_id):
 def commit_state(state):
     state["revision"] += 1
     state["updated_at"] = timestamp()
-    state["runs"] = state["runs"][-100:]
+    state["runs"] = state["runs"][-200:]
+    state["playbook_runs"] = state["playbook_runs"][-50:]
     write_state_unlocked(state)
 
 
@@ -471,6 +701,8 @@ def run_result(state, run):
         "run_id": run["id"],
         "action": run["action"],
         "intensity": run["intensity"],
+        "pattern": run["pattern"],
+        "seed": run["seed"],
         "status": run["status"],
         "duration_seconds": run["duration_seconds"],
         "expires_at": run["expires_at"],
@@ -478,7 +710,612 @@ def run_result(state, run):
         "revision": state["revision"],
         "artifacts": run["artifacts"],
         "conditions": state["conditions"],
+        "playbook_run_id": run.get("playbook_run_id"),
+        "stage_id": run.get("stage_id"),
     }
+
+
+def list_playbooks():
+    with state_lock():
+        return copy.deepcopy(read_state_unlocked()["playbooks"])
+
+
+def save_playbook(playbook):
+    normalized = validate_playbook(playbook)
+    with state_lock():
+        state = read_state_unlocked()
+        state["playbooks"][normalized["id"]] = normalized
+        commit_state(state)
+    return normalized
+
+
+def delete_playbook(playbook_id):
+    with state_lock():
+        state = read_state_unlocked()
+        if playbook_id not in state["playbooks"]:
+            raise ValueError(f"Playbook not found: {playbook_id}")
+        if any(
+            run["playbook_id"] == playbook_id
+            and run["status"] in {"running", "paused"}
+            for run in state["playbook_runs"]
+        ):
+            raise ValueError("Cannot delete a running playbook")
+        removed = state["playbooks"].pop(playbook_id)
+        commit_state(state)
+        return removed
+
+
+def validate_playbook(playbook):
+    if not isinstance(playbook, dict):
+        raise ValueError("Playbook configuration must be an object")
+    normalized = copy.deepcopy(playbook)
+    playbook_id = str(normalized.get("id", "")).strip()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", playbook_id):
+        raise ValueError("Playbook id must use lowercase letters, numbers, _ or -")
+    name = str(normalized.get("name", "")).strip()
+    if not name or len(name) > 120:
+        raise ValueError("Playbook name must be between 1 and 120 characters")
+    stages = normalized.get("stages")
+    if not isinstance(stages, list) or not 1 <= len(stages) <= 20:
+        raise ValueError("Playbook must define between 1 and 20 stages")
+
+    raw_safety = normalized.get("safety", {})
+    if not isinstance(raw_safety, dict):
+        raise ValueError("Playbook safety configuration must be an object")
+    safety = {
+        "max_concurrent_actions": int(
+            raw_safety.get("max_concurrent_actions", 2)
+        ),
+        "max_severity_points": int(
+            raw_safety.get("max_severity_points", 4)
+        ),
+        "max_playbook_seconds": int(
+            raw_safety.get("max_playbook_seconds", 1800)
+        ),
+    }
+    if not 1 <= safety["max_concurrent_actions"] <= 5:
+        raise ValueError("max_concurrent_actions must be between 1 and 5")
+    if not 1 <= safety["max_severity_points"] <= 15:
+        raise ValueError("max_severity_points must be between 1 and 15")
+    if not 60 <= safety["max_playbook_seconds"] <= 7200:
+        raise ValueError("max_playbook_seconds must be between 60 and 7200")
+
+    stage_ids = set()
+    normalized_stages = []
+    for index, stage in enumerate(stages):
+        if not isinstance(stage, dict):
+            raise ValueError(f"Stage {index + 1} must be an object")
+        stage_id = str(stage.get("id", f"stage_{index + 1}")).strip()
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", stage_id):
+            raise ValueError(f"Invalid stage id: {stage_id}")
+        if stage_id in stage_ids:
+            raise ValueError(f"Duplicate stage id: {stage_id}")
+        stage_ids.add(stage_id)
+        action = str(stage.get("action", ""))
+        intensity = str(stage.get("intensity", "medium"))
+        pattern = str(stage.get("pattern", "steady"))
+        duration_seconds = int(stage.get("duration_seconds", 180))
+        start_after_seconds = int(stage.get("start_after_seconds", index * 60))
+        guardrail_profile = str(stage.get("guardrail_profile", "standard"))
+        if guardrail_profile not in GUARDRAIL_PROFILES:
+            raise ValueError(f"Unknown guardrail profile: {guardrail_profile}")
+        validate_request(
+            action,
+            intensity,
+            duration_seconds,
+            GUARDRAIL_PROFILES[guardrail_profile],
+            pattern,
+        )
+        if not 0 <= start_after_seconds <= safety["max_playbook_seconds"]:
+            raise ValueError(
+                f"Stage {stage_id} starts outside the playbook time budget"
+            )
+        normalized_stages.append(
+            {
+                "id": stage_id,
+                "title": str(
+                    stage.get("title", ACTION_CATALOG[action]["label"])
+                )[:120],
+                "action": action,
+                "intensity": intensity,
+                "pattern": pattern,
+                "duration_seconds": duration_seconds,
+                "start_after_seconds": start_after_seconds,
+                "guardrail_profile": guardrail_profile,
+                "stop_conditions": dict(GUARDRAIL_PROFILES[guardrail_profile]),
+                "depends_on": [
+                    str(dependency)
+                    for dependency in stage.get("depends_on", [])
+                ],
+            }
+        )
+
+    for stage in normalized_stages:
+        unknown = set(stage["depends_on"]) - stage_ids
+        if unknown:
+            raise ValueError(
+                f"Stage {stage['id']} has unknown dependencies: {sorted(unknown)}"
+            )
+        if stage["id"] in stage["depends_on"]:
+            raise ValueError(f"Stage {stage['id']} cannot depend on itself")
+    validate_dependency_graph(normalized_stages)
+
+    return {
+        "id": playbook_id,
+        "name": name,
+        "description": str(normalized.get("description", ""))[:500],
+        "seed": int(normalized.get("seed", 2026)),
+        "safety": safety,
+        "stages": normalized_stages,
+    }
+
+
+def validate_dependency_graph(stages):
+    dependencies = {
+        stage["id"]: set(stage["depends_on"])
+        for stage in stages
+    }
+    resolved = set()
+    while len(resolved) < len(stages):
+        ready = {
+            stage_id
+            for stage_id, required in dependencies.items()
+            if stage_id not in resolved and required <= resolved
+        }
+        if not ready:
+            raise ValueError("Playbook stage dependencies contain a cycle")
+        resolved.update(ready)
+
+
+def start_playbook(playbook_id, definition=None, replay_of=None):
+    with state_lock():
+        state = read_state_unlocked()
+        source = definition or state["playbooks"].get(playbook_id)
+        if not source:
+            raise ValueError(f"Playbook not found: {playbook_id}")
+        playbook = validate_playbook(source)
+        playbook_run = {
+            "id": f"pbr_{uuid.uuid4().hex[:12]}",
+            "playbook_id": playbook["id"],
+            "name": playbook["name"],
+            "status": "running",
+            "seed": playbook["seed"],
+            "requested_at": timestamp(),
+            "started_at": timestamp(),
+            "paused_at": None,
+            "total_paused_seconds": 0,
+            "replay_of": replay_of,
+            "definition": playbook,
+            "stages": [
+                {
+                    **copy.deepcopy(stage),
+                    "status": "pending",
+                    "run_id": None,
+                    "waiting_reason": None,
+                }
+                for stage in playbook["stages"]
+            ],
+        }
+        state["playbook_runs"] = (
+            state["playbook_runs"] + [playbook_run]
+        )[-50:]
+        commit_state(state)
+        return playbook_run
+
+
+def replay_playbook_run(playbook_run_id):
+    with state_lock():
+        state = read_state_unlocked()
+        original = find_playbook_run(state, playbook_run_id)
+        definition = copy.deepcopy(original["definition"])
+        new_run = {
+            "id": f"pbr_{uuid.uuid4().hex[:12]}",
+            "playbook_id": definition["id"],
+            "name": definition["name"],
+            "status": "running",
+            "seed": definition["seed"],
+            "requested_at": timestamp(),
+            "started_at": timestamp(),
+            "paused_at": None,
+            "total_paused_seconds": 0,
+            "replay_of": original["id"],
+            "definition": definition,
+            "stages": [
+                {
+                    **copy.deepcopy(stage),
+                    "status": "pending",
+                    "run_id": None,
+                    "waiting_reason": None,
+                }
+                for stage in definition["stages"]
+            ],
+        }
+        state["playbook_runs"] = (state["playbook_runs"] + [new_run])[-50:]
+        commit_state(state)
+        return new_run
+
+
+def pause_playbook_run(playbook_run_id):
+    with state_lock():
+        state = read_state_unlocked()
+        playbook_run = find_playbook_run(state, playbook_run_id)
+        if playbook_run["status"] != "running":
+            raise ValueError("Only running playbooks can be paused")
+        playbook_run["status"] = "paused"
+        playbook_run["paused_at"] = timestamp()
+        commit_state(state)
+        return playbook_run
+
+
+def resume_playbook_run(playbook_run_id):
+    with state_lock():
+        state = read_state_unlocked()
+        playbook_run = find_playbook_run(state, playbook_run_id)
+        if playbook_run["status"] != "paused":
+            raise ValueError("Only paused playbooks can be resumed")
+        paused_at = parse_timestamp(playbook_run["paused_at"])
+        playbook_run["total_paused_seconds"] += (
+            datetime.now(timezone.utc) - paused_at
+        ).total_seconds()
+        playbook_run["paused_at"] = None
+        playbook_run["status"] = "running"
+        commit_state(state)
+        return playbook_run
+
+
+def stop_playbook_run(playbook_run_id, reason="operator_stop"):
+    with state_lock():
+        state = read_state_unlocked()
+        playbook_run = find_playbook_run(state, playbook_run_id)
+        if playbook_run["status"] not in {"running", "paused"}:
+            return playbook_run
+        for stage in playbook_run["stages"]:
+            if stage["status"] == "active" and stage.get("run_id"):
+                action_run = find_run(state, stage["run_id"])
+                active = state["active_actions"].get(action_run["action"])
+                if active and active.get("run_id") == action_run["id"]:
+                    finish_active_unlocked(
+                        state,
+                        action_run["action"],
+                        "aborted",
+                        f"playbook:{reason}",
+                    )
+                stage.update(
+                    {
+                        "status": "aborted",
+                        "reason": reason,
+                        "ended_at": timestamp(),
+                    }
+                )
+            if stage["status"] in {"pending", "starting"}:
+                stage.update(
+                    {
+                        "status": "skipped",
+                        "reason": reason,
+                        "ended_at": timestamp(),
+                    }
+                )
+        playbook_run.update(
+            {
+                "status": "aborted",
+                "reason": reason,
+                "ended_at": timestamp(),
+            }
+        )
+        recompute_conditions(state)
+        commit_state(state)
+        return playbook_run
+
+
+def skip_playbook_stage(playbook_run_id, stage_id):
+    with state_lock():
+        state = read_state_unlocked()
+        playbook_run = find_playbook_run(state, playbook_run_id)
+        stage = find_playbook_stage(playbook_run, stage_id)
+        if stage["status"] == "active" and stage.get("run_id"):
+            action_run = find_run(state, stage["run_id"])
+            active = state["active_actions"].get(action_run["action"])
+            if active and active.get("run_id") == action_run["id"]:
+                finish_active_unlocked(
+                    state,
+                    action_run["action"],
+                    "aborted",
+                    "playbook_stage_skipped",
+                )
+        elif stage["status"] not in {"pending", "starting"}:
+            raise ValueError("Only pending or active stages can be skipped")
+        stage.update(
+            {
+                "status": "skipped",
+                "reason": "operator_skip",
+                "ended_at": timestamp(),
+            }
+        )
+        stage["run_id"] = None
+        recompute_conditions(state)
+        sync_playbook_runs_unlocked(state)
+        commit_state(state)
+        return stage
+
+
+def due_playbook_stages(now=None):
+    current = parse_timestamp(now) if isinstance(now, str) else now
+    current = current or datetime.now(timezone.utc)
+    with state_lock():
+        state = read_state_unlocked()
+        changed = sync_playbook_runs_unlocked(state)
+        due = []
+        for playbook_run in state["playbook_runs"]:
+            if playbook_run["status"] != "running":
+                continue
+            elapsed = playbook_elapsed(playbook_run, current)
+            max_seconds = playbook_run["definition"]["safety"][
+                "max_playbook_seconds"
+            ]
+            if elapsed > max_seconds:
+                stop_playbook_unlocked(
+                    state,
+                    playbook_run,
+                    "playbook_time_budget_exceeded",
+                )
+                changed = True
+                continue
+            stage_status = {
+                stage["id"]: stage["status"]
+                for stage in playbook_run["stages"]
+            }
+            for index, stage in enumerate(playbook_run["stages"]):
+                if stage["status"] != "pending":
+                    continue
+                dependencies = stage.get("depends_on", [])
+                if any(
+                    stage_status.get(dependency) in {"failed", "aborted"}
+                    for dependency in dependencies
+                ):
+                    stage.update(
+                        {
+                            "status": "skipped",
+                            "reason": "dependency_not_completed",
+                            "ended_at": timestamp(),
+                        }
+                    )
+                    changed = True
+                    continue
+                if not all(
+                    stage_status.get(dependency) in {"completed", "skipped"}
+                    for dependency in dependencies
+                ):
+                    if stage.get("waiting_reason") != "waiting_for_dependency":
+                        stage["waiting_reason"] = "waiting_for_dependency"
+                        changed = True
+                    continue
+                if elapsed < stage["start_after_seconds"]:
+                    if stage.get("waiting_reason") != "waiting_for_schedule":
+                        stage["waiting_reason"] = "waiting_for_schedule"
+                        changed = True
+                    continue
+                allowed, reason = playbook_budget_allows_unlocked(
+                    state,
+                    playbook_run,
+                    stage,
+                )
+                if not allowed:
+                    if stage.get("waiting_reason") != reason:
+                        stage["waiting_reason"] = reason
+                        changed = True
+                    continue
+                due.append(
+                    {
+                        "playbook_run_id": playbook_run["id"],
+                        "stage_id": stage["id"],
+                        "stage": copy.deepcopy(stage),
+                        "seed": playbook_run["seed"] + index,
+                    }
+                )
+        if changed:
+            commit_state(state)
+        return due
+
+
+def claim_playbook_stage(playbook_run_id, stage_id):
+    with state_lock():
+        state = read_state_unlocked()
+        playbook_run = find_playbook_run(state, playbook_run_id)
+        if playbook_run["status"] != "running":
+            raise ValueError("Playbook is not running")
+        stage = find_playbook_stage(playbook_run, stage_id)
+        if stage["status"] != "pending":
+            raise ValueError("Playbook stage is not pending")
+        allowed, reason = playbook_budget_allows_unlocked(
+            state,
+            playbook_run,
+            stage,
+        )
+        if not allowed:
+            raise ValueError(reason)
+        stage.update(
+            {
+                "status": "starting",
+                "started_at": timestamp(),
+                "waiting_reason": None,
+            }
+        )
+        commit_state(state)
+        return copy.deepcopy(stage)
+
+
+def link_playbook_stage(playbook_run_id, stage_id, run_id):
+    with state_lock():
+        state = read_state_unlocked()
+        playbook_run = find_playbook_run(state, playbook_run_id)
+        stage = find_playbook_stage(playbook_run, stage_id)
+        if stage["status"] != "starting":
+            raise ValueError("Playbook stage is not starting")
+        stage.update({"status": "active", "run_id": run_id})
+        commit_state(state)
+        return stage
+
+
+def fail_playbook_stage(playbook_run_id, stage_id, reason):
+    with state_lock():
+        state = read_state_unlocked()
+        playbook_run = find_playbook_run(state, playbook_run_id)
+        stage = find_playbook_stage(playbook_run, stage_id)
+        stage.update(
+            {
+                "status": "failed",
+                "reason": reason,
+                "ended_at": timestamp(),
+            }
+        )
+        sync_playbook_runs_unlocked(state)
+        commit_state(state)
+        return stage
+
+
+def sync_playbook_runs():
+    with state_lock():
+        state = read_state_unlocked()
+        if sync_playbook_runs_unlocked(state):
+            commit_state(state)
+        return state["playbook_runs"]
+
+
+def sync_playbook_runs_unlocked(state):
+    changed = False
+    action_runs = {run["id"]: run for run in state["runs"]}
+    for playbook_run in state["playbook_runs"]:
+        if playbook_run["status"] not in {"running", "paused"}:
+            continue
+        for stage in playbook_run["stages"]:
+            linked = action_runs.get(stage.get("run_id"))
+            if (
+                linked
+                and linked["status"] in TERMINAL_RUN_STATUSES
+                and stage["status"] in {"active", "starting"}
+                and stage["status"] != linked["status"]
+            ):
+                stage.update(
+                    {
+                        "status": linked["status"],
+                        "reason": linked.get("reason"),
+                        "ended_at": linked.get("ended_at"),
+                    }
+                )
+                changed = True
+        if all(
+            stage["status"] in TERMINAL_STAGE_STATUSES
+            for stage in playbook_run["stages"]
+        ):
+            statuses = {stage["status"] for stage in playbook_run["stages"]}
+            if "failed" in statuses:
+                final_status = "failed"
+            elif "aborted" in statuses:
+                final_status = "aborted"
+            else:
+                final_status = "completed"
+            playbook_run.update(
+                {
+                    "status": final_status,
+                    "ended_at": timestamp(),
+                }
+            )
+            changed = True
+    return changed
+
+
+def playbook_budget_allows_unlocked(state, playbook_run, stage):
+    safety = playbook_run["definition"]["safety"]
+    active_run_ids = {
+        active["run_id"]
+        for active in state["active_actions"].values()
+    }
+    starting_stages = [
+        candidate
+        for candidate in playbook_run["stages"]
+        if candidate["status"] == "starting"
+    ]
+    current_count = len(active_run_ids) + len(starting_stages)
+    if current_count >= safety["max_concurrent_actions"]:
+        return False, "waiting_for_concurrency_budget"
+    severity = sum(
+        SEVERITY_POINTS[active["intensity"]]
+        for active in state["active_actions"].values()
+    )
+    severity += sum(
+        SEVERITY_POINTS[candidate["intensity"]]
+        for candidate in starting_stages
+    )
+    severity += SEVERITY_POINTS[stage["intensity"]]
+    if severity > safety["max_severity_points"]:
+        return False, "waiting_for_severity_budget"
+    if stage["action"] in state["active_actions"]:
+        return False, "waiting_for_action_availability"
+    return True, None
+
+
+def playbook_elapsed(playbook_run, now=None):
+    current = now or datetime.now(timezone.utc)
+    elapsed = (
+        current - parse_timestamp(playbook_run["started_at"])
+    ).total_seconds()
+    elapsed -= float(playbook_run.get("total_paused_seconds", 0))
+    if playbook_run.get("paused_at"):
+        elapsed -= (
+            current - parse_timestamp(playbook_run["paused_at"])
+        ).total_seconds()
+    return max(0, elapsed)
+
+
+def stop_playbook_unlocked(state, playbook_run, reason):
+    for stage in playbook_run["stages"]:
+        if stage["status"] == "active" and stage.get("run_id"):
+            action_run = find_run(state, stage["run_id"])
+            active = state["active_actions"].get(action_run["action"])
+            if active and active.get("run_id") == action_run["id"]:
+                finish_active_unlocked(
+                    state,
+                    action_run["action"],
+                    "aborted",
+                    f"playbook:{reason}",
+                )
+            stage.update(
+                {
+                    "status": "aborted",
+                    "reason": reason,
+                    "ended_at": timestamp(),
+                }
+            )
+        if stage["status"] in {"pending", "starting"}:
+            stage.update(
+                {
+                    "status": "skipped",
+                    "reason": reason,
+                    "ended_at": timestamp(),
+                }
+            )
+    playbook_run.update(
+        {
+            "status": "aborted",
+            "reason": reason,
+            "ended_at": timestamp(),
+        }
+    )
+    recompute_conditions(state)
+
+
+def find_playbook_run(state, playbook_run_id):
+    for playbook_run in reversed(state["playbook_runs"]):
+        if playbook_run.get("id") == playbook_run_id:
+            return playbook_run
+    raise ValueError(f"Playbook run not found: {playbook_run_id}")
+
+
+def find_playbook_stage(playbook_run, stage_id):
+    for stage in playbook_run["stages"]:
+        if stage.get("id") == stage_id:
+            return stage
+    raise ValueError(f"Playbook stage not found: {stage_id}")
 
 
 def reverse_effect(action):
@@ -549,6 +1386,26 @@ def artifact_markdown(action, intensity, profile):
         "dns_failure": (
             f"The simulated DNS dependency fails approximately "
             f"{profile['rate']:.0%} of checks."
+        ),
+        "object_storage_throttle": (
+            f"Object reads throttle approximately {profile['rate']:.0%} of the "
+            f"time and may return stale simulated data."
+        ),
+        "payment_failure": (
+            f"The simulated payment processor fails approximately "
+            f"{profile['rate']:.0%} of authorization requests."
+        ),
+        "queue_backlog": (
+            f"The simulated queue contains {profile['count'] * 100} messages "
+            f"with {profile['latency_ms']} ms consumer delay."
+        ),
+        "telemetry_gap": (
+            f"Telemetry is delayed by {profile['count'] * 15} seconds with "
+            f"{profile['error_rate']:.0%} missing samples."
+        ),
+        "third_party_degradation": (
+            f"The simulated vendor API fails approximately "
+            f"{profile['rate']:.0%} of requests and requests retries."
         ),
     }
     title = ACTION_CATALOG[action]["label"]

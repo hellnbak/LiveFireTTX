@@ -1,0 +1,12 @@
+.git
+.github
+.venv
+.livefirettx
+backups
+build
+dist
+generated
+*.egg-info
+livefirettx.db
+__pycache__
+*.pyc

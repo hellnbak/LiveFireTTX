@@ -4,7 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}LiveFireTTX{% endblock %}</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="/static/favicon.svg?v={{ app_version }}" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css?v={{ app_version }}">
 </head>
 <body>
   <header>
@@ -13,7 +14,7 @@
         <h1><a href="/">LiveFireTTX</a></h1>
         <span class="version">v{{ app_version }}</span>
       </div>
-      <p>Live-fire tabletop exercise builder and chaos facilitator console</p>
+      <p>Safe, local-first exercise design and chaos orchestration</p>
     </div>
     <nav><a class="button" href="/new">New Exercise</a></nav>
   </header>

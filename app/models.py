@@ -4,52 +4,168 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import json
 import sqlite3
 import uuid
 
-DB_PATH = Path(__file__).resolve().parent.parent / "livefirettx.db"
-GENERATED_ROOT = Path(__file__).resolve().parent.parent / "generated" / "exercises"
+from app.config import settings
+
+
+DB_PATH = settings.database_path
+GENERATED_ROOT = settings.generated_root
+SCHEMA_VERSION = 2
 
 
 SCENARIO_LIBRARY: Dict[str, Dict[str, Any]] = {
     "ransomware": {
         "label": "Ransomware / Business Interruption",
         "description": "A ransomware-like event impacts a business application and file storage.",
+        "default_business_system": "Order Processing",
+        "default_duration_minutes": 120,
+        "default_difficulty": "advanced",
         "target_modules": ["mock_business_app", "postgres", "file_storage", "backup_snapshot", "synthetic_logging"],
         "chaos_modules": ["safe_file_impact", "synthetic_edr_alert", "backup_restore_delay"],
         "default_objectives": ["detect suspicious behavior", "declare incident severity", "contain affected service", "validate backups", "coordinate legal/comms"],
+        "recommended_roles": [
+            "Incident Commander",
+            "Security Operations",
+            "IT Operations",
+            "Backup Team",
+            "Communications",
+            "Business Owner",
+        ],
+        "dependencies": [
+            {"id": "identity", "label": "Identity Provider", "type": "identity"},
+            {"id": "database", "label": "Order Database", "type": "database"},
+            {"id": "storage", "label": "File Storage", "type": "storage"},
+            {"id": "backup", "label": "Backup Service", "type": "backup"},
+        ],
     },
     "cloud_outage": {
         "label": "Cloud / Regional Service Outage",
         "description": "A cloud dependency or regional component becomes unstable.",
-        "target_modules": ["mock_business_app", "postgres", "cache", "health_checks", "synthetic_logging"],
-        "chaos_modules": ["app_degradation", "dns_failure"],
+        "default_business_system": "Customer API",
+        "default_duration_minutes": 90,
+        "default_difficulty": "intermediate",
+        "target_modules": ["mock_business_app", "postgres", "cache", "queue", "object_storage", "payment_processor", "third_party_api", "health_checks", "synthetic_logging"],
+        "chaos_modules": ["app_degradation", "dns_failure", "payment_failure", "queue_backlog", "object_storage_throttle", "third_party_degradation", "telemetry_gap"],
         "default_objectives": ["assess business impact", "test failover decision", "validate monitoring", "communicate outage status"],
+        "recommended_roles": [
+            "Incident Commander",
+            "Cloud Operations",
+            "Application Engineering",
+            "SRE / Observability",
+            "Communications",
+            "Business Owner",
+        ],
+        "dependencies": [
+            {"id": "database", "label": "Order Database", "type": "database"},
+            {"id": "queue", "label": "Order Queue", "type": "queue"},
+            {"id": "storage", "label": "Object Storage", "type": "storage"},
+            {"id": "payments", "label": "Payment Processor", "type": "payment"},
+            {"id": "vendor", "label": "Shipping API", "type": "third_party"},
+            {"id": "telemetry", "label": "Telemetry Pipeline", "type": "observability"},
+        ],
     },
     "supply_chain": {
         "label": "Supply Chain / Dependency Compromise",
         "description": "A suspicious dependency alert creates uncertainty around the build pipeline.",
-        "target_modules": ["mock_repo", "dependency_manifest", "ci_cd_simulator", "mock_business_app", "synthetic_logging"],
-        "chaos_modules": ["dependency_alert"],
+        "default_business_system": "Software Delivery",
+        "default_duration_minutes": 90,
+        "default_difficulty": "advanced",
+        "target_modules": ["mock_repo", "dependency_manifest", "ci_cd_simulator", "mock_business_app", "third_party_api", "synthetic_logging"],
+        "chaos_modules": ["dependency_alert", "third_party_degradation", "telemetry_gap"],
         "default_objectives": ["triage dependency risk", "decide rollback", "coordinate vendor notification", "protect build pipeline"],
+        "recommended_roles": [
+            "Incident Commander",
+            "Application Security",
+            "Engineering Lead",
+            "Platform Engineering",
+            "Vendor Management",
+            "Communications",
+        ],
+        "dependencies": [
+            {"id": "repository", "label": "Source Repository", "type": "source"},
+            {"id": "build", "label": "Build Pipeline", "type": "build"},
+            {"id": "vendor", "label": "Package Registry", "type": "third_party"},
+            {"id": "telemetry", "label": "Security Telemetry", "type": "observability"},
+        ],
     },
     "database_corruption": {
         "label": "Database Corruption / Restore Failure",
         "description": "Application data becomes inconsistent and restore status is uncertain.",
-        "target_modules": ["mock_business_app", "postgres", "backup_snapshot", "synthetic_logging"],
-        "chaos_modules": ["data_corruption", "backup_restore_delay"],
+        "default_business_system": "Order Processing",
+        "default_duration_minutes": 90,
+        "default_difficulty": "advanced",
+        "target_modules": ["mock_business_app", "postgres", "queue", "object_storage", "backup_snapshot", "synthetic_logging"],
+        "chaos_modules": ["data_corruption", "backup_restore_delay", "queue_backlog", "object_storage_throttle"],
         "default_objectives": ["measure RTO/RPO", "validate restore process", "communicate data integrity risk"],
+        "recommended_roles": [
+            "Incident Commander",
+            "Database Team",
+            "Application Engineering",
+            "Backup Team",
+            "Business Owner",
+            "Communications",
+        ],
+        "dependencies": [
+            {"id": "database", "label": "Primary Database", "type": "database"},
+            {"id": "queue", "label": "Write Queue", "type": "queue"},
+            {"id": "storage", "label": "Object Storage", "type": "storage"},
+            {"id": "backup", "label": "Backup Service", "type": "backup"},
+        ],
     },
     "identity_outage": {
         "label": "Identity Provider Outage",
         "description": "SSO/authentication failures affect access to business-critical systems.",
-        "target_modules": ["mock_business_app", "mock_sso", "break_glass_account", "synthetic_logging"],
-        "chaos_modules": ["auth_failure"],
+        "default_business_system": "Workforce Access",
+        "default_duration_minutes": 75,
+        "default_difficulty": "intermediate",
+        "target_modules": ["mock_business_app", "mock_sso", "break_glass_account", "third_party_api", "synthetic_logging"],
+        "chaos_modules": ["auth_failure", "third_party_degradation", "telemetry_gap"],
         "default_objectives": ["validate break-glass access", "triage SaaS dependency", "communicate access impact"],
+        "recommended_roles": [
+            "Incident Commander",
+            "Identity Team",
+            "Security Operations",
+            "Service Desk",
+            "Application Owner",
+            "Communications",
+        ],
+        "dependencies": [
+            {"id": "identity", "label": "Identity Provider", "type": "identity"},
+            {"id": "vendor", "label": "SaaS Control Plane", "type": "third_party"},
+            {"id": "telemetry", "label": "Identity Telemetry", "type": "observability"},
+        ],
+    },
+    "dependency_cascade": {
+        "label": "Critical Dependency Cascade",
+        "description": "Payment, queue, storage, vendor API, and telemetry dependencies degrade in a controlled cascade.",
+        "default_business_system": "Digital Commerce",
+        "default_duration_minutes": 120,
+        "default_difficulty": "advanced",
+        "target_modules": ["mock_business_app", "payment_processor", "queue", "object_storage", "third_party_api", "synthetic_logging"],
+        "chaos_modules": ["payment_failure", "queue_backlog", "object_storage_throttle", "third_party_degradation", "telemetry_gap"],
+        "default_objectives": ["map dependency impact", "prioritize degraded services", "manage retry pressure", "communicate uncertainty", "validate recovery order"],
+        "recommended_roles": [
+            "Incident Commander",
+            "Application Engineering",
+            "Platform Engineering",
+            "SRE / Observability",
+            "Vendor Management",
+            "Business Owner",
+            "Communications",
+        ],
+        "dependencies": [
+            {"id": "payments", "label": "Payment Processor", "type": "payment"},
+            {"id": "queue", "label": "Order Queue", "type": "queue"},
+            {"id": "storage", "label": "Object Storage", "type": "storage"},
+            {"id": "vendor", "label": "Fulfillment API", "type": "third_party"},
+            {"id": "telemetry", "label": "Telemetry Pipeline", "type": "observability"},
+        ],
     },
 }
 
@@ -100,8 +216,11 @@ class InjectOption:
 
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=5)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 5000")
+    conn.execute("PRAGMA journal_mode = WAL")
     return conn
 
 
@@ -109,63 +228,142 @@ def init_db() -> None:
     with connect() as conn:
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS exercises (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                scenario_type TEXT NOT NULL,
-                platform TEXT NOT NULL,
-                business_system TEXT NOT NULL,
-                difficulty TEXT NOT NULL,
-                duration_minutes INTEGER NOT NULL,
-                participants TEXT NOT NULL,
-                objectives TEXT NOT NULL,
-                status TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                package_path TEXT NOT NULL
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                version INTEGER PRIMARY KEY,
+                applied_at TEXT NOT NULL
             )
             """
         )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS inject_options (
-                id TEXT PRIMARY KEY,
-                exercise_id TEXT NOT NULL,
-                stage TEXT NOT NULL,
-                title TEXT NOT NULL,
-                audience TEXT NOT NULL,
-                description TEXT NOT NULL,
-                action_type TEXT NOT NULL,
-                script_name TEXT,
-                payload TEXT NOT NULL,
-                triggered INTEGER NOT NULL DEFAULT 0,
-                triggered_at TEXT,
-                trigger_count INTEGER NOT NULL DEFAULT 0,
-                FOREIGN KEY(exercise_id) REFERENCES exercises(id)
-            )
-            """
-        )
-        inject_columns = {
-            row["name"]
-            for row in conn.execute("PRAGMA table_info(inject_options)").fetchall()
+        applied = {
+            row["version"]
+            for row in conn.execute(
+                "SELECT version FROM schema_migrations"
+            ).fetchall()
         }
-        if "trigger_count" not in inject_columns:
+        migrations = {
+            1: _migration_1_initial_schema,
+            2: _migration_2_trigger_count,
+        }
+        for version, migration in migrations.items():
+            if version in applied:
+                continue
+            migration(conn)
             conn.execute(
-                "ALTER TABLE inject_options ADD COLUMN trigger_count INTEGER NOT NULL DEFAULT 0"
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                (version, timestamp()),
             )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS run_events (
-                id TEXT PRIMARY KEY,
-                exercise_id TEXT NOT NULL,
-                event_type TEXT NOT NULL,
-                title TEXT NOT NULL,
-                detail TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY(exercise_id) REFERENCES exercises(id)
-            )
-            """
-        )
         conn.commit()
+
+
+def _migration_1_initial_schema(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS exercises (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            scenario_type TEXT NOT NULL,
+            platform TEXT NOT NULL,
+            business_system TEXT NOT NULL,
+            difficulty TEXT NOT NULL,
+            duration_minutes INTEGER NOT NULL,
+            participants TEXT NOT NULL,
+            objectives TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            package_path TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS inject_options (
+            id TEXT PRIMARY KEY,
+            exercise_id TEXT NOT NULL,
+            stage TEXT NOT NULL,
+            title TEXT NOT NULL,
+            audience TEXT NOT NULL,
+            description TEXT NOT NULL,
+            action_type TEXT NOT NULL,
+            script_name TEXT,
+            payload TEXT NOT NULL,
+            triggered INTEGER NOT NULL DEFAULT 0,
+            triggered_at TEXT,
+            FOREIGN KEY(exercise_id) REFERENCES exercises(id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS run_events (
+            id TEXT PRIMARY KEY,
+            exercise_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            detail TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(exercise_id) REFERENCES exercises(id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS objective_assessments (
+            exercise_id TEXT NOT NULL,
+            objective_index INTEGER NOT NULL,
+            rating TEXT NOT NULL,
+            notes TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (exercise_id, objective_index),
+            FOREIGN KEY(exercise_id) REFERENCES exercises(id)
+        )
+        """
+    )
+
+
+def _migration_2_trigger_count(conn: sqlite3.Connection) -> None:
+    inject_columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(inject_options)").fetchall()
+    }
+    if "trigger_count" not in inject_columns:
+        conn.execute(
+            "ALTER TABLE inject_options "
+            "ADD COLUMN trigger_count INTEGER NOT NULL DEFAULT 0"
+        )
+
+
+def database_schema_version() -> int:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations"
+        ).fetchone()
+    return int(row["version"]) if row else 0
+
+
+def database_health() -> dict[str, Any]:
+    try:
+        with connect() as conn:
+            integrity = conn.execute("PRAGMA quick_check").fetchone()
+            conn.execute("SELECT 1").fetchone()
+            schema_row = conn.execute(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
+            ).fetchone()
+    except (OSError, sqlite3.Error) as exc:
+        return {
+            "healthy": False,
+            "schema_version": 0,
+            "error": str(exc),
+            "path": str(DB_PATH),
+        }
+    return {
+        "healthy": bool(integrity and integrity[0] == "ok"),
+        "schema_version": int(schema_row[0]) if schema_row else 0,
+        "path": str(DB_PATH),
+    }
+
+
+def timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def new_id(prefix: str) -> str:
@@ -293,7 +491,7 @@ def get_inject(inject_id: str) -> Optional[InjectOption]:
 
 
 def mark_inject_triggered(inject_id: str) -> None:
-    now = datetime.utcnow().isoformat() + "Z"
+    now = timestamp()
     with connect() as conn:
         conn.execute(
             """
@@ -312,7 +510,7 @@ def add_event(exercise_id: str, event_type: str, title: str, detail: str) -> Non
     with connect() as conn:
         conn.execute(
             "INSERT INTO run_events VALUES (?, ?, ?, ?, ?, ?)",
-            (new_id("evt"), exercise_id, event_type, title, detail, datetime.utcnow().isoformat() + "Z"),
+            (new_id("evt"), exercise_id, event_type, title, detail, timestamp()),
         )
         conn.commit()
 
@@ -320,3 +518,48 @@ def add_event(exercise_id: str, event_type: str, title: str, detail: str) -> Non
 def list_events(exercise_id: str) -> List[sqlite3.Row]:
     with connect() as conn:
         return conn.execute("SELECT * FROM run_events WHERE exercise_id = ? ORDER BY created_at DESC", (exercise_id,)).fetchall()
+
+
+def save_objective_assessment(
+    exercise_id: str,
+    objective_index: int,
+    rating: str,
+    notes: str,
+) -> None:
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO objective_assessments (
+                exercise_id,
+                objective_index,
+                rating,
+                notes,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(exercise_id, objective_index) DO UPDATE SET
+                rating = excluded.rating,
+                notes = excluded.notes,
+                updated_at = excluded.updated_at
+            """,
+            (
+                exercise_id,
+                objective_index,
+                rating,
+                notes,
+                timestamp(),
+            ),
+        )
+        conn.commit()
+
+
+def list_objective_assessments(exercise_id: str) -> List[sqlite3.Row]:
+    with connect() as conn:
+        return conn.execute(
+            """
+            SELECT *
+            FROM objective_assessments
+            WHERE exercise_id = ?
+            ORDER BY objective_index
+            """,
+            (exercise_id,),
+        ).fetchall()

@@ -1,56 +1,64 @@
 # Safety Model
 
-LiveFireTTX is intended for controlled tabletop and resilience exercises. The platform should simulate incident symptoms and decision pressure without creating unsafe capability.
+LiveFireTTX is intended for controlled tabletop and resilience exercises. It
+simulates incident symptoms and decision pressure without creating malicious or
+destructive capability.
 
-## Allowed simulation patterns
+## Allowed Simulation Patterns
 
-The MVP supports safe patterns such as:
+- Synthetic alerts, messages, tickets, and advisories
+- Safe renaming of generated test files
+- Local application latency and error conditions
+- Synthetic DNS and authentication failures
+- Backup uncertainty and seeded data-integrity warnings
+- Simulated payment failure, queue backlog, storage throttle, stale reads,
+  vendor API failure, retry pressure, and telemetry delay
+- Facilitator notes, assessments, and package-contained evidence
 
-- Synthetic alert generation
-- Safe test-file renames
-- Fake ransom-note artifacts clearly marked as simulated
-- Local app degradation flags
-- Synthetic DNS/auth failure artifacts
-- Backup uncertainty reports
-- Dependency advisory artifacts
-- Data integrity warning artifacts
-- Facilitator notes and manual injects
+## Disallowed Behavior
 
-## Disallowed behavior
+LiveFireTTX must not generate, execute, or facilitate:
 
-LiveFireTTX should not generate, execute, or facilitate:
+- Malware, ransomware, credential theft, or exploit chains
+- Persistence, evasion, anti-forensics, or destructive deletion
+- Unauthorized scanning, access, or data exfiltration
+- Security-control bypass logic
+- Arbitrary commands, executable injects, remote target addresses, or
+  operator-selected filesystem paths
 
-- Malware or ransomware
-- Credential theft
-- Exploit chains
-- Persistence
-- Evasion
-- Anti-forensics
-- Destructive deletion
-- Unauthorized scanning
-- Real-world data exfiltration
-- Bypass logic for security controls
+## v1.0 Controller Guardrails
 
-## Design principle
+- Allows only actions included in the generated scenario
+- Modifies generated synthetic state and package artifacts only
+- Binds target, controller, and facilitator services to localhost
+- Requires matching target and controller exercise identities
+- Bounds runs to 15–3600 seconds
+- Supports only approved intensity profiles and fault patterns
+- Validates playbooks before save and execution
+- Limits stage count, total time, concurrency, and severity
+- Captures immutable definitions and deterministic replay seeds
+- Monitors target availability, identity, latency, and error rate
+- Automatically rolls back expired and guardrail-aborted effects
+- Provides per-action reset and global emergency stop
+- Preserves evidence when state is reset
+- Rejects paths that resolve outside generated package boundaries
 
-Simulate indicators and operational impact. Do not create real malicious capability.
+Dependency faults alter local API behavior only. They do not contact payment
+processors, queues, storage providers, telemetry systems, or third-party APIs.
 
-## Chaos controller guardrails
+## Artifact and Evidence Safety
 
-The generated v0.3 chaos controller:
+- Facilitator artifacts are approved plain-Markdown types with generated names.
+- Artifacts are visibly watermarked at the beginning and end.
+- Titles, audiences, stages, content size, and resolved paths are validated.
+- CSV formula-leading cells are escaped.
+- Readiness scores are provisional exercise signals, not compliance findings.
+- Evidence archives may contain participant notes and should be reviewed before
+  external sharing.
 
-- Exposes only actions allowlisted for the selected scenario
-- Changes generated test state and synthetic artifacts only
-- Uses bounded low, medium, and high intensity profiles
-- Requires a matching target and controller preflight
-- Limits every run to 15–3600 seconds
-- Monitors latency, error rate, target availability, and exercise identity
-- Automatically rolls back expired or guardrail-aborted effects
-- Supports reset and emergency stop without deleting evidence artifacts
-- Binds generated host ports to `127.0.0.1`
-- Rejects facilitator scripts that resolve outside the generated chaos directory
-- Does not accept shell commands, executable payloads, target addresses, or arbitrary file paths
+## Operator Guidance
 
-## Operator guidance
-
-Run generated environments only in isolated lab systems. Review generated packages before executing them. Do not expose the chaos control API beyond localhost, point generated controls at production systems, or replace generated actions with unreviewed code. Use cloud renderers only with scoped lab accounts when those features are added.
+Run only on isolated lab systems. Review generated packages before deployment.
+Do not expose ports beyond localhost, point generated controls at production, or
+replace safe actions with unreviewed code. Use emergency stop whenever observed
+impact exceeds the exercise plan.

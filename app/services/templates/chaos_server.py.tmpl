@@ -1,29 +1,71 @@
+from __future__ import annotations
+
 from contextlib import asynccontextmanager
 import asyncio
 import json
+import logging
 import os
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
+from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from engine import (
     abort,
     activate_run,
     available_actions,
     begin_run,
+    claim_playbook_stage,
+    delete_playbook,
+    due_playbook_stages,
+    fail_playbook_stage,
     fail_run,
     get_state,
+    link_playbook_stage,
+    list_playbooks,
     observe_run,
-    reconcile_expired,
+    pause_playbook_run,
+    replay_playbook_run,
     reset,
+    resume_playbook_run,
+    save_playbook,
+    skip_playbook_stage,
+    start_playbook,
+    stop_playbook_run,
+    sync_playbook_runs,
+    update_patterns,
+    validate_playbook,
 )
 
 
 EXERCISE_ID = "__EXERCISE_ID__"
 TARGET_URL = os.environ.get("LIVEFIRE_TARGET_URL", "http://livefire-target:8088")
+LOGGER = logging.getLogger("livefire.chaos")
+APPROVED_HOSTS = {
+    "127.0.0.1",
+    "localhost",
+    "::1",
+    "host.docker.internal",
+    "testserver",
+}
+MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def target_resource(path):
+    try:
+        with urllib.request.urlopen(f"{TARGET_URL}{path}", timeout=1) as response:
+            return json.loads(response.read())
+    except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Target resource unavailable: {exc}",
+        ) from exc
 
 
 def target_snapshot():
@@ -68,19 +110,96 @@ def guardrail_violation(active, snapshot):
     return None
 
 
+def require_target_preflight():
+    snapshot = target_snapshot()
+    if not snapshot["reachable"] or not snapshot["matches_exercise"]:
+        raise HTTPException(
+            status_code=503,
+            detail="Target preflight failed for this exercise",
+        )
+    return snapshot
+
+
+def fail_action_run(run_id, action, reason, snapshot=None):
+    state = get_state()
+    run = next((item for item in state["runs"] if item["id"] == run_id), None)
+    if not run:
+        return
+    if run["status"] == "pending":
+        fail_run(run_id, reason, snapshot)
+    elif run["status"] == "active":
+        abort(action, reason)
+
+
+def orchestrate_due_stages():
+    for due in due_playbook_stages():
+        playbook_run_id = due["playbook_run_id"]
+        stage_id = due["stage_id"]
+        stage = due["stage"]
+        claimed = False
+        action_run_id = None
+        snapshot = None
+        try:
+            stage = claim_playbook_stage(playbook_run_id, stage_id)
+            claimed = True
+            snapshot = target_snapshot()
+            if not snapshot["reachable"] or not snapshot["matches_exercise"]:
+                fail_playbook_stage(
+                    playbook_run_id,
+                    stage_id,
+                    "target_preflight_failed",
+                )
+                continue
+
+            pending = begin_run(
+                stage["action"],
+                stage["intensity"],
+                stage["duration_seconds"],
+                stage["stop_conditions"],
+                pattern=stage["pattern"],
+                seed=due["seed"],
+                playbook_run_id=playbook_run_id,
+                stage_id=stage_id,
+            )
+            action_run_id = pending["id"]
+            activate_run(action_run_id, snapshot)
+            link_playbook_stage(playbook_run_id, stage_id, action_run_id)
+            observe_run(action_run_id, "after_apply", target_snapshot())
+        except ValueError as exc:
+            if action_run_id:
+                fail_action_run(
+                    action_run_id,
+                    stage["action"],
+                    f"playbook_stage_failed:{exc}",
+                    snapshot,
+                )
+            if claimed:
+                fail_playbook_stage(playbook_run_id, stage_id, str(exc))
+            LOGGER.warning(
+                "Unable to start playbook stage %s/%s: %s",
+                playbook_run_id,
+                stage_id,
+                exc,
+            )
+
+
 async def monitor_runs():
     while True:
-        await asyncio.sleep(2)
-        reconcile_expired()
-        state = get_state()
-        if not state["active_actions"]:
-            continue
-        snapshot = target_snapshot()
-        for action, active in list(state["active_actions"].items()):
-            violation = guardrail_violation(active, snapshot)
-            observe_run(active["run_id"], "guardrail_check", snapshot)
-            if violation:
-                abort(action, f"guardrail:{violation}")
+        await asyncio.sleep(1)
+        try:
+            update_patterns()
+            orchestrate_due_stages()
+            state = get_state()
+            if state["active_actions"]:
+                snapshot = target_snapshot()
+                for action, active in list(state["active_actions"].items()):
+                    violation = guardrail_violation(active, snapshot)
+                    observe_run(active["run_id"], "guardrail_check", snapshot)
+                    if violation:
+                        abort(action, f"guardrail:{violation}")
+            sync_playbook_runs()
+        except Exception:
+            LOGGER.exception("Chaos orchestration monitor failed")
 
 
 @asynccontextmanager
@@ -97,18 +216,73 @@ async def lifespan(app):
 
 
 app = FastAPI(
-    title="LiveFireTTX Guarded Chaos Control",
+    title="LiveFireTTX Chaos Orchestration Studio",
     description=(
-        "Scenario-scoped, timed, reversible simulation controls with preflight "
-        "checks, stop conditions, and automatic rollback."
+        "Scenario-scoped fault patterns and deterministic playbooks with safety "
+        "budgets, target preflight, live telemetry, and automatic rollback."
     ),
-    version="0.3.0",
+    version="1.0.0",
     lifespan=lifespan,
 )
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=[
+        "127.0.0.1",
+        "localhost",
+        "[::1]",
+        "host.docker.internal",
+        "testserver",
+    ],
+)
+
+
+def same_local_origin(request, origin):
+    try:
+        candidate = urlsplit(origin)
+        request_origin = urlsplit(
+            f"{request.url.scheme}://{request.headers.get('host', '')}"
+        )
+        candidate_port = candidate.port or 80
+        request_port = request_origin.port or 80
+    except ValueError:
+        return False
+    return bool(
+        candidate.scheme == request.url.scheme == "http"
+        and candidate.hostname in APPROVED_HOSTS
+        and request_origin.hostname in APPROVED_HOSTS
+        and candidate_port == request_port
+        and candidate.username is None
+        and candidate.password is None
+        and candidate.path in {"", "/"}
+        and not candidate.query
+        and not candidate.fragment
+    )
+
+
+@app.middleware("http")
+async def protect_mutations(request: Request, call_next):
+    origin = request.headers.get("origin")
+    fetch_site = request.headers.get("sec-fetch-site", "").lower()
+    opaque_same_origin = origin == "null" and fetch_site == "same-origin"
+    if request.method in MUTATING_METHODS and (
+        (
+            origin is not None
+            and not opaque_same_origin
+            and not same_local_origin(request, origin)
+        )
+        or (origin is None and fetch_site == "cross-site")
+    ):
+        return JSONResponse(
+            {"detail": "Cross-origin state changes are not allowed"},
+            status_code=403,
+        )
+    return await call_next(request)
 
 
 class ActionRequest(BaseModel):
     intensity: str = "medium"
+    pattern: str = "steady"
+    seed: Optional[int] = None
     duration_seconds: int = Field(default=300, ge=15, le=3600)
     max_latency_ms: int = Field(default=5000, ge=100, le=10000)
     max_error_rate: float = Field(default=0.5, ge=0, le=1)
@@ -119,19 +293,44 @@ class ActionRequest(BaseModel):
 def health():
     state = get_state()
     target = target_snapshot()
+    active_playbooks = [
+        run
+        for run in state["playbook_runs"]
+        if run["status"] in {"running", "paused"}
+    ]
     return {
         "healthy": True,
         "ready": target["reachable"] and target["matches_exercise"],
         "exercise_id": EXERCISE_ID,
         "revision": state["revision"],
         "active_runs": len(state["active_actions"]),
+        "active_playbooks": len(active_playbooks),
         "target": target,
     }
+
+
+@app.get("/ready")
+def ready():
+    snapshot = target_snapshot()
+    is_ready = snapshot["reachable"] and snapshot["matches_exercise"]
+    return JSONResponse(
+        {
+            "ready": is_ready,
+            "exercise_id": EXERCISE_ID,
+            "target": snapshot,
+        },
+        status_code=200 if is_ready else 503,
+    )
 
 
 @app.get("/actions")
 def actions():
     return {"actions": available_actions()}
+
+
+@app.get("/dependencies")
+def dependencies():
+    return target_resource("/dependencies")
 
 
 @app.get("/state")
@@ -142,6 +341,19 @@ def state():
 @app.get("/runs")
 def runs():
     return {"runs": get_state()["runs"]}
+
+
+@app.get("/telemetry")
+def telemetry():
+    state = get_state()
+    return {
+        "exercise_id": EXERCISE_ID,
+        "revision": state["revision"],
+        "conditions": state["conditions"],
+        "active_actions": state["active_actions"],
+        "playbook_runs": state["playbook_runs"][-10:],
+        "target": target_snapshot(),
+    }
 
 
 @app.post("/actions/{action}")
@@ -156,6 +368,8 @@ def apply_action(action: str, request: ActionRequest):
                 "max_error_rate": request.max_error_rate,
                 "abort_on_target_unreachable": request.abort_on_target_unreachable,
             },
+            pattern=request.pattern,
+            seed=request.seed,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -200,3 +414,94 @@ def reset_one(action: str):
 @app.post("/emergency-stop")
 def emergency_stop():
     return abort(reason="emergency_stop")
+
+
+@app.get("/playbooks")
+def playbooks():
+    return {"playbooks": list(list_playbooks().values())}
+
+
+@app.post("/playbooks/validate")
+def validate_playbook_configuration(
+    playbook: dict = Body(...),
+):
+    try:
+        return validate_playbook(playbook)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.put("/playbooks/{playbook_id}")
+def put_playbook(
+    playbook_id: str,
+    playbook: dict = Body(...),
+):
+    if playbook.get("id") not in {None, playbook_id}:
+        raise HTTPException(
+            status_code=400,
+            detail="Playbook path id does not match the configuration id",
+        )
+    playbook["id"] = playbook_id
+    try:
+        return save_playbook(playbook)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/playbooks/{playbook_id}")
+def remove_playbook(playbook_id: str):
+    try:
+        removed = delete_playbook(playbook_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"deleted": removed["id"]}
+
+
+@app.post("/playbooks/{playbook_id}/start")
+def run_playbook(playbook_id: str):
+    require_target_preflight()
+    try:
+        return start_playbook(playbook_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/playbook-runs/{playbook_run_id}/pause")
+def pause_playbook(playbook_run_id: str):
+    try:
+        return pause_playbook_run(playbook_run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/playbook-runs/{playbook_run_id}/resume")
+def resume_playbook(playbook_run_id: str):
+    try:
+        return resume_playbook_run(playbook_run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/playbook-runs/{playbook_run_id}/stop")
+def stop_playbook(playbook_run_id: str):
+    try:
+        return stop_playbook_run(playbook_run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/playbook-runs/{playbook_run_id}/replay")
+def replay_playbook(playbook_run_id: str):
+    require_target_preflight()
+    try:
+        return replay_playbook_run(playbook_run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/playbook-runs/{playbook_run_id}/stages/{stage_id}/skip")
+def skip_stage(playbook_run_id: str, stage_id: str):
+    try:
+        return skip_playbook_stage(playbook_run_id, stage_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
