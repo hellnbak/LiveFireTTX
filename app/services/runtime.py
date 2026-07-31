@@ -10,7 +10,10 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 import json
+import re
 import subprocess
+
+import yaml
 
 from app.models import Exercise, InjectOption
 
@@ -72,6 +75,7 @@ def run_chaos_inject(
     intensity: str = "medium",
     duration_seconds: int = 300,
     guardrail_profile: str = "standard",
+    pattern: str = "steady",
 ) -> str:
     if inject.action_type != "chaos_script":
         raise ValueError("Inject is not a chaos action")
@@ -85,6 +89,7 @@ def run_chaos_inject(
             duration_seconds,
             "duration",
         )
+        _validate_option(inject, "patterns", pattern, "pattern")
         guardrails = inject.payload.get("guardrail_profiles", {})
         if guardrails:
             if guardrail_profile not in guardrails:
@@ -107,6 +112,7 @@ def run_chaos_inject(
                 f"{CONTROL_URL}/actions/{quote(str(action))}",
                 {
                     "intensity": intensity,
+                    "pattern": pattern,
                     "duration_seconds": int(duration_seconds),
                     **guardrails[guardrail_profile],
                 },
@@ -120,7 +126,16 @@ def run_chaos_inject(
         )
         return _run_script(
             script,
-            ["run", str(action), "--intensity", intensity],
+            [
+                "run",
+                str(action),
+                "--intensity",
+                intensity,
+                "--pattern",
+                pattern,
+                "--duration",
+                str(duration_seconds),
+            ],
         )
 
     if not inject.script_name:
@@ -158,7 +173,91 @@ def emergency_stop(exercise: Exercise) -> str:
     return reset_chaos(exercise)
 
 
-def _guarded_request(exercise: Exercise, endpoint: str) -> dict[str, Any]:
+def read_playbook_configuration(exercise: Exercise) -> str:
+    playbook_root = Path(exercise.package_path) / "chaos" / "playbooks"
+    try:
+        playbook_path = next(iter(sorted(playbook_root.glob("*.yml"))))
+        return playbook_path.read_text()
+    except (FileNotFoundError, OSError, StopIteration):
+        state = read_chaos_state(exercise) or {}
+        playbooks = state.get("playbooks", {})
+        if not playbooks:
+            return ""
+        return yaml.safe_dump(next(iter(playbooks.values())), sort_keys=False)
+
+
+def save_playbook_configuration(
+    exercise: Exercise,
+    configuration: str,
+) -> dict[str, Any]:
+    if len(configuration.encode()) > 64 * 1024:
+        raise ValueError("Playbook configuration is too large")
+    try:
+        playbook = yaml.safe_load(configuration)
+    except yaml.YAMLError as exc:
+        raise ValueError(f"Invalid playbook YAML: {exc}") from exc
+    if not isinstance(playbook, dict):
+        raise ValueError("Playbook YAML must contain one playbook object")
+    playbook_id = str(playbook.get("id", ""))
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", playbook_id):
+        raise ValueError("Playbook id must use lowercase letters, numbers, _ or -")
+    normalized = _guarded_request(
+        exercise,
+        f"/playbooks/{quote(playbook_id)}",
+        playbook,
+        method="PUT",
+    )
+    playbook_root = Path(exercise.package_path) / "chaos" / "playbooks"
+    playbook_root.mkdir(parents=True, exist_ok=True)
+    (playbook_root / f"{normalized['id']}.yml").write_text(
+        yaml.safe_dump(normalized, sort_keys=False)
+    )
+    return normalized
+
+
+def start_chaos_playbook(
+    exercise: Exercise,
+    playbook_id: str,
+) -> dict[str, Any]:
+    return _guarded_request(
+        exercise,
+        f"/playbooks/{quote(playbook_id)}/start",
+    )
+
+
+def control_chaos_playbook_run(
+    exercise: Exercise,
+    playbook_run_id: str,
+    command: str,
+) -> dict[str, Any]:
+    if command not in {"pause", "resume", "stop", "replay"}:
+        raise ValueError(f"Unsupported playbook command: {command}")
+    return _guarded_request(
+        exercise,
+        f"/playbook-runs/{quote(playbook_run_id)}/{command}",
+    )
+
+
+def skip_chaos_playbook_stage(
+    exercise: Exercise,
+    playbook_run_id: str,
+    stage_id: str,
+) -> dict[str, Any]:
+    return _guarded_request(
+        exercise,
+        (
+            f"/playbook-runs/{quote(playbook_run_id)}"
+            f"/stages/{quote(stage_id)}/skip"
+        ),
+    )
+
+
+def _guarded_request(
+    exercise: Exercise,
+    endpoint: str,
+    payload: dict[str, Any] | None = None,
+    method: str = "POST",
+) -> dict[str, Any]:
     status = read_control_status(exercise)
     if not status.get("reachable"):
         raise ChaosPreflightError("Guarded chaos controller is unavailable")
@@ -166,7 +265,11 @@ def _guarded_request(exercise: Exercise, endpoint: str) -> dict[str, Any]:
         raise ChaosPreflightError(
             "The running chaos controller belongs to a different exercise"
         )
-    return _request_json(f"{CONTROL_URL}{endpoint}", {})
+    return _request_json(
+        f"{CONTROL_URL}{endpoint}",
+        {} if payload is None and method == "POST" else payload,
+        method=method,
+    )
 
 
 def _validate_option(
@@ -230,12 +333,14 @@ def _request_json(
     url: str,
     payload: dict[str, Any] | None = None,
     timeout: float = 4,
+    method: str | None = None,
 ) -> dict[str, Any]:
     data = json.dumps(payload).encode() if payload is not None else None
     request = Request(
         url,
         data=data,
         headers={"Content-Type": "application/json"} if data else {},
+        method=method,
     )
     try:
         with urlopen(request, timeout=timeout) as response:

@@ -59,8 +59,18 @@ class GeneratedPackageTests(TestCase):
                         control = json.loads(
                             (chaos_root / "control.json").read_text()
                         )
-                        self.assertEqual("0.3.0", control["version"])
+                        self.assertEqual("0.4.0", control["version"])
                         self.assertEqual(exercise.id, control["exercise_id"])
+                        playbook_path = (
+                            chaos_root / "playbooks" / "scenario_cascade.yml"
+                        )
+                        self.assertTrue(playbook_path.is_file())
+                        playbook = yaml.safe_load(playbook_path.read_text())
+                        self.assertEqual("scenario_cascade", playbook["id"])
+                        self.assertEqual(
+                            min(4, len(playbook["stages"]) * 2),
+                            playbook["safety"]["max_severity_points"],
+                        )
 
                         action_ids = [
                             inject.payload["action"]
@@ -78,6 +88,15 @@ class GeneratedPackageTests(TestCase):
                             sorted(action_ids),
                             sorted(listed["actions"]),
                         )
+                        self.assertEqual(
+                            ["burst", "flap", "jitter", "ramp", "steady"],
+                            listed["patterns"],
+                        )
+                        playbooks = self.run_cli(chaos_root, "playbooks")
+                        self.assertIn(
+                            "scenario_cascade",
+                            playbooks["playbooks"],
+                        )
 
                         for action in action_ids:
                             result = self.run_cli(
@@ -86,6 +105,8 @@ class GeneratedPackageTests(TestCase):
                                 action,
                                 "--intensity",
                                 "low",
+                                "--pattern",
+                                "flap",
                                 "--duration",
                                 "60",
                                 "--skip-preflight",
@@ -93,6 +114,7 @@ class GeneratedPackageTests(TestCase):
                             self.assertTrue(result["ok"])
                             self.assertEqual(action, result["action"])
                             self.assertEqual("active", result["status"])
+                            self.assertEqual("flap", result["pattern"])
                             self.assertTrue(result["expires_at"])
 
                         state = self.run_cli(chaos_root, "state")
@@ -257,6 +279,139 @@ print(json.dumps({
                         run["status"]
                         for run in result["final_state"]["runs"]
                     ],
+                )
+
+    def test_fault_patterns_and_playbook_budgets_are_deterministic(self) -> None:
+        with TemporaryDirectory() as temporary:
+            with patch(
+                "app.services.generator.GENERATED_ROOT",
+                Path(temporary),
+            ):
+                exercise, _ = create_exercise_from_request(
+                    ExerciseCreate(
+                        name="Cloud orchestration",
+                        scenario_type="cloud_outage",
+                    )
+                )
+                chaos_root = Path(exercise.package_path) / "chaos"
+                environment = {
+                    **os.environ,
+                    "LIVEFIRE_STATE_DIR": str(chaos_root / "state"),
+                    "LIVEFIRE_ARTIFACTS_DIR": str(
+                        Path(exercise.package_path) / "artifacts"
+                    ),
+                }
+                script = """
+import json
+import engine
+import server
+
+healthy = {
+    "reachable": True,
+    "matches_exercise": True,
+    "exercise_id": server.EXERCISE_ID,
+    "healthy": True,
+    "conditions": {"latency_ms": 0, "error_rate": 0.0},
+}
+server.target_snapshot = lambda: healthy
+jitter_a = engine.pattern_multiplier("jitter", 12, 60, 42, "run_test")
+jitter_b = engine.pattern_multiplier("jitter", 12, 60, 42, "run_test")
+playbook = server.put_playbook(
+    "budget_test",
+    {
+        "id": "budget_test",
+        "name": "Budget Test",
+        "seed": 42,
+        "safety": {
+            "max_concurrent_actions": 1,
+            "max_severity_points": 2,
+            "max_playbook_seconds": 300,
+        },
+        "stages": [
+            {
+                "id": "degrade",
+                "action": "app_degradation",
+                "intensity": "medium",
+                "pattern": "ramp",
+                "duration_seconds": 60,
+                "start_after_seconds": 0,
+            },
+            {
+                "id": "dns",
+                "action": "dns_failure",
+                "intensity": "medium",
+                "pattern": "flap",
+                "duration_seconds": 60,
+                "start_after_seconds": 0,
+            },
+        ],
+    },
+)
+playbook_run = server.run_playbook(playbook["id"])
+server.orchestrate_due_stages()
+engine.due_playbook_stages()
+state = engine.get_state()
+current = next(
+    item for item in state["playbook_runs"] if item["id"] == playbook_run["id"]
+)
+stopped = server.stop_playbook(playbook_run["id"])
+replayed = server.replay_playbook(playbook_run["id"])
+server.orchestrate_due_stages()
+emergency = server.emergency_stop()
+print(json.dumps({
+    "jitter": [jitter_a, jitter_b],
+    "ramp": [
+        engine.pattern_multiplier("ramp", 0, 60, 42, "run_test"),
+        engine.pattern_multiplier("ramp", 36, 60, 42, "run_test"),
+    ],
+    "flap": [
+        engine.pattern_multiplier("flap", 0, 60, 42, "run_test"),
+        engine.pattern_multiplier("flap", 10, 60, 42, "run_test"),
+    ],
+    "stages": current["stages"],
+    "active_actions": state["active_actions"],
+    "stopped": stopped,
+    "replayed": replayed,
+    "emergency": emergency,
+}))
+"""
+                process = subprocess.run(
+                    [sys.executable, "-c", script],
+                    cwd=chaos_root,
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(0, process.returncode, process.stderr)
+                result = json.loads(process.stdout)
+                self.assertEqual(result["jitter"][0], result["jitter"][1])
+                self.assertEqual([0.0, 1.0], result["ramp"])
+                self.assertEqual([1.0, 0.0], result["flap"])
+                self.assertEqual(
+                    ["active", "pending"],
+                    [stage["status"] for stage in result["stages"]],
+                )
+                self.assertEqual(
+                    "waiting_for_concurrency_budget",
+                    result["stages"][1]["waiting_reason"],
+                )
+                self.assertEqual(
+                    ["app_degradation"],
+                    list(result["active_actions"]),
+                )
+                self.assertEqual("aborted", result["stopped"]["status"])
+                self.assertEqual(
+                    result["stopped"]["id"],
+                    result["replayed"]["replay_of"],
+                )
+                self.assertEqual(
+                    result["stopped"]["seed"],
+                    result["replayed"]["seed"],
+                )
+                self.assertEqual(
+                    ["app_degradation"],
+                    result["emergency"]["stopped"],
                 )
 
     def test_timed_run_reconciles_to_completed(self) -> None:

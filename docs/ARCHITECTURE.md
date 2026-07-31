@@ -1,6 +1,6 @@
 # LiveFireTTX Architecture
 
-LiveFireTTX is intentionally local-first. Version 0.3 uses a FastAPI facilitator app, Jinja2 templates, SQLite persistence, and generated Docker Compose labs with a separate guarded chaos control service.
+LiveFireTTX is intentionally local-first. Version 0.4 uses a FastAPI facilitator app, Jinja2 templates, SQLite persistence, and generated Docker Compose labs with a separate chaos orchestration service.
 
 ## Core flow
 
@@ -41,23 +41,25 @@ The web form captures scenario type, business system, difficulty, participants, 
 - `reports/after_action_template.md`
 - `cleanup/destroy.sh`
 
-### Facilitator Console
+### Facilitator Command Center
 
-The console groups injects by stage and lets the exercise leader manually trigger each inject. Guarded chaos runs support low, medium, and high intensity, bounded durations, reusable stop-condition profiles, repeat execution, reset, and emergency stop. Trigger counts and action results are stored in SQLite and shown in the run log.
+The console groups injects by stage and lets the exercise leader manually trigger each inject. It also displays live condition telemetry, active fault patterns, playbook safety budgets, and orchestration timelines. Facilitators can edit validated YAML, launch or replay playbooks, pause future scheduling, skip stages, stop runs, reset state, or activate the global emergency stop. Trigger counts and action results are stored in SQLite and shown in the run log.
 
 ### Target Environment
 
 The target environment is generated per exercise. It exposes safe business and dependency endpoints that react to shared simulation conditions such as latency, application errors, authentication failures, DNS failures, backup delays, blocked builds, and seeded-record integrity issues.
 
-### Guarded Chaos Control Plane
+### Chaos Orchestration Control Plane
 
-The chaos environment is generated separately from the target environment and runs on `127.0.0.1:8090`. Its API and CLI share an allowlisted lifecycle engine. Each generated exercise contains only the actions relevant to its scenario. State updates use file locking and atomic replacement, while synthetic artifacts and run observations are retained for exercise evidence.
+The chaos environment is generated separately from the target environment and runs on `127.0.0.1:8090`. Its API and CLI share an allowlisted lifecycle engine. Each generated exercise contains only the actions relevant to its scenario and one editable scenario playbook. State updates use file locking and atomic replacement, while synthetic artifacts, playbook snapshots, seeds, and run observations are retained for exercise evidence.
 
 ```text
 Facilitator Console or Chaos API
   -> Controller and target preflight
   -> Scenario action allowlist
-  -> Intensity + duration + stop conditions
+  -> Manual action or validated playbook
+  -> Intensity + fault pattern + duration
+  -> Concurrency + severity + time budgets
   -> Pending run
   -> Locked state update
   -> Active run
@@ -69,15 +71,20 @@ Facilitator Console or Chaos API
   -> Completed / aborted / failed run
 ```
 
-The controller monitors active runs every two seconds. It records target
+The controller scheduler evaluates playbook stages and fault patterns every second. It records target
 observations and aborts runs when the target becomes unreachable, reports a
 different exercise ID, or exceeds configured latency or error-rate thresholds.
 The target independently ignores expired effects, preserving rollback behavior
 if the controller is temporarily unavailable.
 
+Playbook stages are copied into each run so later configuration edits cannot
+change an active or historical execution. Replays reuse that captured definition
+and seed. Pausing stops future stage scheduling but intentionally leaves active,
+bounded action runs in place until they expire, are skipped, or are stopped.
+
 ### Runtime Safety Boundary
 
-`app/services/runtime.py` verifies the running controller and target belong to the selected exercise, validates intensity, duration, and guardrail selections, and routes v0.3 actions through the guarded API. Legacy package execution remains path-contained and time-bounded.
+`app/services/runtime.py` verifies the running controller and target belong to the selected exercise, validates intensity, pattern, duration, and guardrail selections, and routes v0.4 actions and playbook controls through the orchestration API. YAML configuration is size-limited, parsed safely, validated by the scenario-scoped engine, and persisted only after the controller accepts it. Legacy package execution remains path-contained and time-bounded.
 
 ## Future renderers
 

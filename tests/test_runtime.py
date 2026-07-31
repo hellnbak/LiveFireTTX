@@ -5,11 +5,13 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 import json
+import yaml
 
 from app.models import Exercise, InjectOption
 from app.services.runtime import (
     ChaosPreflightError,
     run_chaos_inject,
+    save_playbook_configuration,
 )
 
 
@@ -64,6 +66,7 @@ class RuntimeSafetyTests(TestCase):
                         intensity="high",
                         duration_seconds=600,
                         guardrail_profile="strict",
+                        pattern="burst",
                     )
                 )
 
@@ -71,8 +74,66 @@ class RuntimeSafetyTests(TestCase):
             self.assertEqual("strict", result["guardrail_profile"])
             payload = request.call_args_list[1].args[1]
             self.assertEqual(600, payload["duration_seconds"])
+            self.assertEqual("burst", payload["pattern"])
             self.assertEqual(2500, payload["max_latency_ms"])
             self.assertEqual(0.25, payload["max_error_rate"])
+
+    def test_playbook_save_validates_remotely_and_persists_yaml(self) -> None:
+        with TemporaryDirectory() as temporary:
+            exercise = self.exercise(Path(temporary))
+            self.write_control_metadata(exercise)
+            normalized = {
+                "id": "response_drill",
+                "name": "Response Drill",
+                "seed": 42,
+                "safety": {
+                    "max_concurrent_actions": 1,
+                    "max_severity_points": 2,
+                    "max_playbook_seconds": 300,
+                },
+                "stages": [
+                    {
+                        "id": "degrade",
+                        "action": "app_degradation",
+                        "intensity": "medium",
+                        "pattern": "ramp",
+                        "duration_seconds": 60,
+                        "start_after_seconds": 0,
+                    }
+                ],
+            }
+            with patch(
+                "app.services.runtime._request_json",
+                side_effect=[
+                    {
+                        "exercise_id": exercise.id,
+                        "ready": True,
+                        "target": {"reachable": True},
+                    },
+                    normalized,
+                ],
+            ) as request:
+                saved = save_playbook_configuration(
+                    exercise,
+                    """
+id: response_drill
+name: Response Drill
+stages:
+  - id: degrade
+    action: app_degradation
+""",
+                )
+
+            self.assertEqual(normalized, saved)
+            self.assertEqual("PUT", request.call_args_list[1].kwargs["method"])
+            persisted = (
+                Path(exercise.package_path)
+                / "chaos"
+                / "playbooks"
+                / "response_drill.yml"
+            )
+            self.assertTrue(persisted.is_file())
+            self.assertEqual(normalized, yaml.safe_load(persisted.read_text()))
 
     def test_chaos_script_cannot_escape_generated_directory(self) -> None:
         with TemporaryDirectory() as temporary:
@@ -122,6 +183,7 @@ class RuntimeSafetyTests(TestCase):
                 "action": "app_degradation",
                 "intensities": ["low", "medium", "high"],
                 "durations": [60, 300, 600],
+                "patterns": ["steady", "burst"],
                 "guardrail_profiles": {
                     "strict": {
                         "max_latency_ms": 2500,
@@ -138,7 +200,7 @@ class RuntimeSafetyTests(TestCase):
         (chaos_root / "control.json").write_text(
             json.dumps(
                 {
-                    "version": "0.3.0",
+                    "version": "0.4.0",
                     "exercise_id": exercise.id,
                 }
             )

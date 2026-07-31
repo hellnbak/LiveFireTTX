@@ -2,7 +2,7 @@
 
 LiveFireTTX is a local-first application for building and running live-fire tabletop exercises. It helps facilitators generate a scenario-specific target environment, a safe chaos control plane, inject options, exercise artifacts, and a web console where the tabletop leader can steer the exercise.
 
-> **Status:** v0.3 prototype. Use only in controlled lab environments.
+> **Status:** v0.4 prototype. Use only in controlled lab environments.
 
 ## What it does
 
@@ -13,6 +13,11 @@ LiveFireTTX is a local-first application for building and running live-fire tabl
 - Provides a facilitator inject console
 - Runs target preflight checks before every guarded chaos action
 - Lets the exercise leader choose intensity, duration, and guardrail profile
+- Supports steady, ramp, burst, flap, and deterministic jitter fault patterns
+- Generates editable YAML playbooks with timed, overlapping stages
+- Enforces concurrency, severity, and total playbook time budgets
+- Provides pause, resume, skip, stop, and seeded replay controls
+- Streams live condition telemetry into the facilitator command center
 - Automatically rolls back expired actions or runs that exceed stop conditions
 - Provides reset and emergency-stop controls
 - Makes the generated target respond to latency, error, auth, DNS, backup, build, and data-integrity conditions
@@ -98,7 +103,8 @@ The same scenario-scoped controls are available from the generated package:
 cd generated/exercises/<exercise-id>/chaos
 python3 chaos_cli.py list
 python3 chaos_cli.py preflight
-python3 chaos_cli.py run app_degradation --intensity medium --duration 300
+python3 chaos_cli.py run app_degradation --intensity medium --pattern ramp --duration 300
+python3 chaos_cli.py playbooks
 python3 chaos_cli.py state
 python3 chaos_cli.py stop
 ```
@@ -140,7 +146,8 @@ requirements.txt
 Scenario Builder
   -> Scenario Definition
   -> Target Environment Generator
-  -> Safe Chaos API / CLI
+  -> Chaos Orchestration API / CLI
+  -> Deterministic Playbooks + Safety Budgets
   -> Facilitator Inject Console
   -> Run Log
   -> After-Action Report Template

@@ -33,22 +33,32 @@
 - Facilitator emergency stop
 - Target-side expiration when the controller is unavailable
 
-## Next: v0.4 chaos orchestration
+## v0.4 Chaos Orchestration Studio
 
 - Multi-step chaos sequences and saved playbooks
 - Timer-based inject and action scheduling
 - Playbook pause, resume, skip, and emergency-stop controls
 - Health-gated transitions between playbook stages
 - Scenario-specific reusable playbook templates
-- Richer observed-impact charts and telemetry
+- Steady, ramp, burst, flap, and seeded jitter fault patterns
+- Concurrency, severity, and total-runtime safety budgets
+- Deterministic playbook replay
+- Live observed-impact telemetry and command-center UI
+- Validated YAML playbook configuration
+
+## Next: v0.5 exercise intelligence
+
+- Visual drag-and-drop playbook builder
 - Facilitator-defined safe artifact injects
 - Additional simulated service dependencies
+- Run comparison and impact charts
+- Markdown/CSV evidence package export
+- Exercise scoring rubric and objective tracking
+- Saved playbook template library
 
 ## Near-term exercise workflow
 
-- Export run logs to Markdown/CSV
 - Better scenario templates
-- Exercise scoring rubric
 - Role-specific participant views
 - Built-in sample data sets
 - Improved UI and branding

@@ -6,7 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -28,11 +28,16 @@ from app.services.generator import create_exercise_from_request
 from app.services.runtime import (
     ChaosExecutionError,
     ChaosPreflightError,
+    control_chaos_playbook_run,
     emergency_stop,
     read_chaos_state,
     read_control_status,
+    read_playbook_configuration,
     reset_chaos,
     run_chaos_inject,
+    save_playbook_configuration,
+    skip_chaos_playbook_stage,
+    start_chaos_playbook,
 )
 from app.version import __version__
 
@@ -127,6 +132,7 @@ def exercise_detail(request: Request, exercise_id: str):
             "events": events,
             "chaos_state": read_chaos_state(ex),
             "control_status": read_control_status(ex),
+            "playbook_configuration": read_playbook_configuration(ex),
         },
     )
 
@@ -137,6 +143,7 @@ def trigger_inject(
     intensity: str = Form("medium"),
     duration_seconds: int = Form(300),
     guardrail_profile: str = Form("standard"),
+    pattern: str = Form("steady"),
 ):
     inj = get_inject(inject_id)
     if not inj:
@@ -156,6 +163,7 @@ def trigger_inject(
                 intensity,
                 duration_seconds,
                 guardrail_profile,
+                pattern,
             )
         except ValueError as exc:
             result = str(exc)
@@ -176,6 +184,7 @@ def trigger_inject(
         detail += (
             f"\nIntensity: {intensity}"
             f"\nDuration: {duration_seconds} seconds"
+            f"\nPattern: {pattern}"
             f"\nGuardrails: {guardrail_profile}"
         )
     add_event(ex.id, "inject_triggered", inj.title, f"{detail}\n{result}")
@@ -222,6 +231,132 @@ def emergency_stop_exercise_chaos(exercise_id: str):
         "chaos_emergency_stop",
         "Emergency Stop",
         result,
+    )
+    return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
+
+
+@app.get("/exercises/{exercise_id}/chaos/status")
+def exercise_chaos_status(exercise_id: str):
+    ex = get_exercise(exercise_id)
+    if not ex:
+        raise HTTPException(404, "Exercise not found")
+    return JSONResponse(
+        {
+            "state": read_chaos_state(ex),
+            "control": read_control_status(ex),
+        }
+    )
+
+
+@app.post("/exercises/{exercise_id}/playbooks")
+def save_exercise_playbook(
+    exercise_id: str,
+    playbook_yaml: str = Form(...),
+):
+    ex = get_exercise(exercise_id)
+    if not ex:
+        raise HTTPException(404, "Exercise not found")
+    try:
+        playbook = save_playbook_configuration(ex, playbook_yaml)
+    except ValueError as exc:
+        add_event(ex.id, "playbook_save_failed", "Playbook Save Failed", str(exc))
+        raise HTTPException(400, str(exc)) from exc
+    except ChaosPreflightError as exc:
+        add_event(ex.id, "playbook_save_failed", "Playbook Save Failed", str(exc))
+        raise HTTPException(503, str(exc)) from exc
+    except ChaosExecutionError as exc:
+        add_event(ex.id, "playbook_save_failed", "Playbook Save Failed", str(exc))
+        raise HTTPException(502, str(exc)) from exc
+    add_event(
+        ex.id,
+        "playbook_saved",
+        f"Playbook Saved: {playbook['name']}",
+        f"ID: {playbook['id']}\nStages: {len(playbook['stages'])}",
+    )
+    return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
+
+
+@app.post("/exercises/{exercise_id}/playbooks/{playbook_id}/start")
+def start_exercise_playbook(exercise_id: str, playbook_id: str):
+    ex = get_exercise(exercise_id)
+    if not ex:
+        raise HTTPException(404, "Exercise not found")
+    try:
+        playbook_run = start_chaos_playbook(ex, playbook_id)
+    except ChaosPreflightError as exc:
+        add_event(ex.id, "playbook_start_failed", "Playbook Start Failed", str(exc))
+        raise HTTPException(503, str(exc)) from exc
+    except ChaosExecutionError as exc:
+        add_event(ex.id, "playbook_start_failed", "Playbook Start Failed", str(exc))
+        raise HTTPException(502, str(exc)) from exc
+    add_event(
+        ex.id,
+        "playbook_started",
+        f"Playbook Started: {playbook_run['name']}",
+        f"Run: {playbook_run['id']}\nSeed: {playbook_run['seed']}",
+    )
+    return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
+
+
+@app.post(
+    "/exercises/{exercise_id}/playbook-runs/{playbook_run_id}/{command}"
+)
+def control_exercise_playbook(
+    exercise_id: str,
+    playbook_run_id: str,
+    command: str,
+):
+    ex = get_exercise(exercise_id)
+    if not ex:
+        raise HTTPException(404, "Exercise not found")
+    try:
+        result = control_chaos_playbook_run(
+            ex,
+            playbook_run_id,
+            command,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except ChaosPreflightError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except ChaosExecutionError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    add_event(
+        ex.id,
+        f"playbook_{command}",
+        f"Playbook {command.title()}",
+        f"Run: {result['id']}\nStatus: {result['status']}",
+    )
+    return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
+
+
+@app.post(
+    "/exercises/{exercise_id}/playbook-runs/{playbook_run_id}"
+    "/stages/{stage_id}/skip"
+)
+def skip_exercise_playbook_stage(
+    exercise_id: str,
+    playbook_run_id: str,
+    stage_id: str,
+):
+    ex = get_exercise(exercise_id)
+    if not ex:
+        raise HTTPException(404, "Exercise not found")
+    try:
+        stage = skip_chaos_playbook_stage(
+            ex,
+            playbook_run_id,
+            stage_id,
+        )
+    except ChaosPreflightError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except ChaosExecutionError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    add_event(
+        ex.id,
+        "playbook_stage_skipped",
+        f"Playbook Stage Skipped: {stage['title']}",
+        f"Run: {playbook_run_id}\nStage: {stage_id}",
     )
     return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
 

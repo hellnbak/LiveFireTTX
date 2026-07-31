@@ -282,9 +282,11 @@ def _chaos_inject(
         {
             "safe": True,
             "action": action,
-            "control_version": "0.3.0",
+            "control_version": "0.4.0",
             "intensities": ["low", "medium", "high"],
             "default_intensity": "medium",
+            "patterns": ["steady", "ramp", "burst", "flap", "jitter"],
+            "default_pattern": "steady",
             "durations": [60, 300, 600, 900],
             "default_duration": 300,
             "guardrail_profiles": {
@@ -359,12 +361,14 @@ def render_exercise_package(
             ## Facilitator Notes
             Use the LiveFireTTX console to trigger narrative injects and safe chaos
             actions. Chaos runs support low, medium, and high intensity, bounded
-            durations, target preflight checks, automatic rollback, and configurable
-            stop conditions.
+            durations, deterministic fault patterns, target preflight checks,
+            automatic rollback, and configurable stop conditions.
 
             The generated control API is available at `http://127.0.0.1:8090/docs`
-            after deploying the target environment. Use the emergency stop whenever
-            observed impact exceeds the exercise plan.
+            after deploying the target environment. The facilitator console can edit
+            and launch YAML playbooks, pause future stage scheduling, skip stages,
+            replay a run with the same seed, and monitor safety budgets. Use the
+            emergency stop whenever observed impact exceeds the exercise plan.
             """
         )
     )

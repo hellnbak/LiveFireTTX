@@ -16,7 +16,7 @@ from app.models import Exercise, InjectOption
 
 
 TEMPLATE_ROOT = Path(__file__).resolve().parent / "templates"
-CONTROL_VERSION = "0.3.0"
+CONTROL_VERSION = "0.4.0"
 ACTION_CATALOG: dict[str, dict[str, Any]] = {
     "app_degradation": {
         "label": "Application Degradation",
@@ -181,14 +181,26 @@ def render_chaos_environment(
             if inject.action_type == "chaos_script" and inject.payload.get("action")
         }
     )
+    default_playbooks = _default_playbooks(exercise, allowed_actions)
     state_dir = root / "chaos" / "state"
     state_dir.mkdir(exist_ok=True)
     (state_dir / "state.json").write_text(
-        json.dumps(_default_state(), indent=2, sort_keys=True)
+        json.dumps(
+            _default_state(default_playbooks),
+            indent=2,
+            sort_keys=True,
+        )
     )
+    playbook_dir = root / "chaos" / "playbooks"
+    playbook_dir.mkdir(exist_ok=True)
+    for playbook_id, playbook in default_playbooks.items():
+        (playbook_dir / f"{playbook_id}.yml").write_text(
+            yaml.safe_dump(playbook, sort_keys=False)
+        )
 
     replacements = {
         "__ALLOWED_ACTIONS__": repr(allowed_actions),
+        "__DEFAULT_PLAYBOOKS__": repr(default_playbooks),
         "__EXERCISE_ID__": exercise.id,
     }
     engine = _load_template("chaos_engine.py.tmpl", replacements)
@@ -227,7 +239,17 @@ def render_chaos_environment(
         "target": "http://127.0.0.1:8088",
         "cli": "python3 chaos_cli.py",
         "intensities": ["low", "medium", "high"],
+        "patterns": ["steady", "ramp", "burst", "flap", "jitter"],
         "duration_seconds": {"minimum": 15, "default": 300, "maximum": 3600},
+        "playbooks": {
+            "directory": "playbooks",
+            "default": next(iter(default_playbooks), None),
+            "safety_budgets": [
+                "max_concurrent_actions",
+                "max_severity_points",
+                "max_playbook_seconds",
+            ],
+        },
         "default_stop_conditions": {
             "max_latency_ms": 5000,
             "max_error_rate": 0.5,
@@ -244,18 +266,19 @@ def render_chaos_environment(
     (root / "chaos" / "README.md").write_text(
         dedent(
             f"""
-            # LiveFireTTX Guarded Chaos Control
+            # LiveFireTTX Chaos Orchestration Studio
 
             This package exposes scenario-scoped chaos actions through a local CLI
-            and HTTP API. Every run performs a target preflight, has a bounded
-            duration, records observations, and automatically rolls back.
+            and HTTP API. It supports deterministic fault patterns, YAML playbooks,
+            bounded safety budgets, target preflight, live telemetry, and automatic
+            rollback.
 
             ## CLI
 
             ```bash
             python3 chaos_cli.py preflight
             python3 chaos_cli.py list
-            python3 chaos_cli.py run {allowed_actions[0] if allowed_actions else "ACTION_ID"} --intensity medium --duration 300
+            python3 chaos_cli.py run {allowed_actions[0] if allowed_actions else "ACTION_ID"} --intensity medium --pattern ramp --duration 300
             python3 chaos_cli.py state
             python3 chaos_cli.py stop
             ```
@@ -263,9 +286,13 @@ def render_chaos_environment(
             ## API
 
             Deploy the target package, then open `http://127.0.0.1:8090/docs`.
-            The controller monitors active runs every two seconds and aborts them
+            The controller monitors active runs every second and aborts them
             when configured latency, error-rate, target-availability, or exercise
             identity guardrails fail.
+
+            Default playbooks are stored in `playbooks/` and can be validated,
+            saved, started, paused, resumed, stopped, skipped, and replayed through
+            the API or the LiveFireTTX facilitator console.
 
             `--skip-preflight` exists only for offline package validation. Never use
             it during an exercise.
@@ -281,17 +308,66 @@ def _load_template(name: str, replacements: dict[str, str]) -> str:
     return content
 
 
-def _default_state() -> dict[str, Any]:
+def _default_state(
+    playbooks: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "control_version": CONTROL_VERSION,
         "revision": 0,
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "active_actions": {},
         "conditions": dict(DEFAULT_CONDITIONS),
         "runs": [],
+        "playbooks": playbooks or {},
+        "playbook_runs": [],
         "history": [],
     }
+
+
+def _default_playbooks(
+    exercise: Exercise,
+    allowed_actions: list[str],
+) -> dict[str, dict[str, Any]]:
+    if not allowed_actions:
+        return {}
+    patterns = {
+        "app_degradation": "ramp",
+        "auth_failure": "burst",
+        "dns_failure": "flap",
+        "synthetic_edr_alert": "jitter",
+    }
+    stages = []
+    for index, action in enumerate(allowed_actions):
+        stages.append(
+            {
+                "id": f"wave_{index + 1}_{action}",
+                "title": ACTION_CATALOG[action]["label"],
+                "action": action,
+                "intensity": "medium",
+                "pattern": patterns.get(action, "steady"),
+                "duration_seconds": 180,
+                "start_after_seconds": index * 45,
+                "guardrail_profile": "standard",
+                "depends_on": [],
+            }
+        )
+    playbook = {
+        "id": "scenario_cascade",
+        "name": f"{exercise.name} Scenario Cascade",
+        "description": (
+            "A deterministic, overlapping fault sequence generated for this "
+            "exercise. Edit timing, patterns, and budgets before facilitation."
+        ),
+        "seed": 2026 + sum(ord(character) for character in exercise.id),
+        "safety": {
+            "max_concurrent_actions": min(2, len(stages)),
+            "max_severity_points": min(4, len(stages) * 2),
+            "max_playbook_seconds": 900,
+        },
+        "stages": stages,
+    }
+    return {playbook["id"]: playbook}
 
 
 def _target_app_source() -> str:

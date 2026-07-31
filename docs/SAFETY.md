@@ -37,15 +37,22 @@ Simulate indicators and operational impact. Do not create real malicious capabil
 
 ## Chaos controller guardrails
 
-The generated v0.3 chaos controller:
+The generated v0.4 chaos controller:
 
 - Exposes only actions allowlisted for the selected scenario
 - Changes generated test state and synthetic artifacts only
 - Uses bounded low, medium, and high intensity profiles
 - Requires a matching target and controller preflight
 - Limits every run to 15–3600 seconds
+- Applies only steady, ramp, burst, flap, or seeded jitter multipliers
+- Validates YAML playbooks before saving or execution
+- Limits playbooks to 20 stages and 60–7200 seconds
+- Enforces per-playbook concurrency and severity budgets
+- Captures immutable definitions and seeds for auditable replay
+- Pauses future scheduling without extending active action duration
 - Monitors latency, error rate, target availability, and exercise identity
 - Automatically rolls back expired or guardrail-aborted effects
+- Stops active playbooks and actions through one emergency control
 - Supports reset and emergency stop without deleting evidence artifacts
 - Binds generated host ports to `127.0.0.1`
 - Rejects facilitator scripts that resolve outside the generated chaos directory
