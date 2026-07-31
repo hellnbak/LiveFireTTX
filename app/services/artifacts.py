@@ -4,11 +4,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from pathlib import Path
 from textwrap import dedent
 import re
 
 from app.models import Exercise, InjectOption, new_id
+from app.services.paths import exercise_package_path, exercise_package_root
 
 
 ARTIFACT_KINDS = {
@@ -55,16 +55,19 @@ def create_safe_artifact_inject(
         raise ValueError("Artifact content must be between 1 and 10000 characters")
 
     inject_id = new_id("inj")
-    package_root = Path(exercise.package_path).resolve()
-    artifacts_root = (package_root / "artifacts").resolve()
-    if package_root not in artifacts_root.parents:
-        raise ValueError("Exercise artifact directory resolves outside the package")
-    artifact_root = artifacts_root / "facilitator"
+    package_root = exercise_package_root(exercise)
+    artifact_root = exercise_package_path(
+        exercise,
+        "artifacts",
+        "facilitator",
+    )
     artifact_root.mkdir(parents=True, exist_ok=True)
-    artifact_root = artifact_root.resolve()
-    if artifacts_root not in artifact_root.parents:
-        raise ValueError("Facilitator artifact directory resolves outside the package")
-    artifact_path = artifact_root / f"{inject_id}_{artifact_kind}.md"
+    artifact_path = exercise_package_path(
+        exercise,
+        "artifacts",
+        "facilitator",
+        f"{inject_id}_{artifact_kind}.md",
+    )
     kind = ARTIFACT_KINDS[artifact_kind]
     artifact_path.write_text(
         dedent(
@@ -113,14 +116,11 @@ def create_safe_artifact_inject(
 
 def artifact_trigger_result(exercise: Exercise, inject: InjectOption) -> str:
     relative_path = str(inject.payload.get("artifact", ""))
-    package_root = Path(exercise.package_path).resolve()
-    artifact_path = (package_root / relative_path).resolve()
-    artifact_root = (package_root / "artifacts").resolve()
-    if (
-        package_root not in artifact_root.parents
-        or artifact_root not in artifact_path.parents
-        or not artifact_path.is_file()
-    ):
+    parts = relative_path.split("/")
+    if not parts or parts[0] != "artifacts":
+        raise ValueError("Artifact file is unavailable or outside the exercise package")
+    artifact_path = exercise_package_path(exercise, *parts)
+    if not artifact_path.is_file():
         raise ValueError("Artifact file is unavailable or outside the exercise package")
     return f"Prepared safe exercise artifact: {relative_path}"
 

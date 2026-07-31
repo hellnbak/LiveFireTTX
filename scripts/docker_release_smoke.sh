@@ -54,7 +54,11 @@ print(exercise.package_path)
 PY
 )"
 
-docker compose -f "${package_path}/target/docker-compose.yml" up -d --build
+docker compose -f "${package_path}/target/docker-compose.yml" up \
+  -d \
+  --build \
+  --wait \
+  --wait-timeout 90
 "${package_path}/target/validate.sh"
 (
   cd "${package_path}/chaos"

@@ -10,6 +10,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 import json
+import logging
 import re
 import subprocess
 
@@ -17,12 +18,14 @@ import yaml
 
 from app.config import settings
 from app.models import Exercise, InjectOption
+from app.services.paths import exercise_package_path
 
 
 CONTROL_URL = settings.control_url
 REQUEST_TIMEOUT_SECONDS = settings.request_timeout_seconds
 PLAYBOOK_ID_PATTERN = r"[a-z0-9][a-z0-9_-]{0,63}"
 PLAYBOOK_VERSION_PATTERN = r"\d{8}T\d{12}Z"
+LOGGER = logging.getLogger("livefirettx.runtime")
 
 
 class ChaosExecutionError(RuntimeError):
@@ -34,7 +37,12 @@ class ChaosPreflightError(ChaosExecutionError):
 
 
 def read_chaos_state(exercise: Exercise) -> dict[str, Any] | None:
-    state_path = Path(exercise.package_path) / "chaos" / "state" / "state.json"
+    state_path = exercise_package_path(
+        exercise,
+        "chaos",
+        "state",
+        "state.json",
+    )
     try:
         state = json.loads(state_path.read_text())
     except (FileNotFoundError, json.JSONDecodeError, OSError):
@@ -56,13 +64,14 @@ def read_control_status(exercise: Exercise) -> dict[str, Any]:
             f"{CONTROL_URL}/health",
             timeout=min(REQUEST_TIMEOUT_SECONDS, 1),
         )
-    except ChaosExecutionError as exc:
+    except ChaosExecutionError:
+        LOGGER.warning("Chaos controller health request failed")
         return {
             "mode": "guarded",
             "reachable": False,
             "ready": False,
             "exercise_id": exercise.id,
-            "error": str(exc),
+            "error": "Chaos controller is unavailable",
             "target": {"reachable": False},
         }
 
@@ -84,11 +93,12 @@ def read_dependency_status(exercise: Exercise) -> dict[str, Any]:
             f"{CONTROL_URL}/dependencies",
             timeout=min(REQUEST_TIMEOUT_SECONDS, 1),
         )
-    except ChaosExecutionError as exc:
+    except ChaosExecutionError:
+        LOGGER.warning("Chaos controller dependency request failed")
         return {
             "reachable": False,
             "dependencies": [],
-            "error": str(exc),
+            "error": "Dependency status is unavailable",
         }
     return {
         **result,
@@ -180,7 +190,7 @@ def reset_chaos(exercise: Exercise, action: str | None = None) -> str:
         result = _guarded_request(exercise, endpoint)
         return json.dumps(result, indent=2, sort_keys=True)
 
-    chaos_root = Path(exercise.package_path).resolve() / "chaos"
+    chaos_root = exercise_package_path(exercise, "chaos")
     cli = chaos_root / "chaos_cli.py"
     if cli.exists():
         arguments = ["reset"]
@@ -202,7 +212,7 @@ def emergency_stop(exercise: Exercise) -> str:
 
 
 def read_playbook_configuration(exercise: Exercise) -> str:
-    playbook_root = Path(exercise.package_path) / "chaos" / "playbooks"
+    playbook_root = exercise_package_path(exercise, "chaos", "playbooks")
     try:
         playbook_path = next(iter(sorted(playbook_root.glob("*.yml"))))
         return playbook_path.read_text()
@@ -220,7 +230,7 @@ def read_playbook_definition(
 ) -> dict[str, Any]:
     if playbook_id and not re.fullmatch(PLAYBOOK_ID_PATTERN, playbook_id):
         raise ValueError("Invalid playbook id")
-    playbook_root = Path(exercise.package_path) / "chaos" / "playbooks"
+    playbook_root = exercise_package_path(exercise, "chaos", "playbooks")
     candidates = (
         [playbook_root / f"{playbook_id}.yml"]
         if playbook_id
@@ -264,12 +274,12 @@ def list_playbook_versions(
 ) -> list[dict[str, str]]:
     if not re.fullmatch(PLAYBOOK_ID_PATTERN, playbook_id):
         raise ValueError("Invalid playbook id")
-    history_root = (
-        Path(exercise.package_path)
-        / "chaos"
-        / "playbooks"
-        / "history"
-        / playbook_id
+    history_root = exercise_package_path(
+        exercise,
+        "chaos",
+        "playbooks",
+        "history",
+        playbook_id,
     )
     versions = []
     for path in sorted(history_root.glob("*.yml"), reverse=True):
@@ -317,21 +327,44 @@ def save_playbook_configuration(
         playbook,
         method="PUT",
     )
-    playbook_root = Path(exercise.package_path) / "chaos" / "playbooks"
+    normalized_id = str(normalized.get("id", ""))
+    if normalized_id != playbook_id or not re.fullmatch(
+        PLAYBOOK_ID_PATTERN,
+        normalized_id,
+    ):
+        raise ChaosExecutionError("Chaos controller returned an invalid playbook id")
+    playbook_root = exercise_package_path(exercise, "chaos", "playbooks")
     playbook_root.mkdir(parents=True, exist_ok=True)
-    playbook_path = playbook_root / f"{normalized['id']}.yml"
+    playbook_path = exercise_package_path(
+        exercise,
+        "chaos",
+        "playbooks",
+        f"{normalized_id}.yml",
+    )
     serialized = yaml.safe_dump(normalized, sort_keys=False)
     if playbook_path.exists():
         current = playbook_path.read_text()
         if current != serialized:
-            history_root = (
-                playbook_root / "history" / normalized["id"]
+            history_root = exercise_package_path(
+                exercise,
+                "chaos",
+                "playbooks",
+                "history",
+                normalized_id,
             )
             history_root.mkdir(parents=True, exist_ok=True)
             version_id = datetime.now(timezone.utc).strftime(
                 "%Y%m%dT%H%M%S%fZ"
             )
-            (history_root / f"{version_id}.yml").write_text(current)
+            version_path = exercise_package_path(
+                exercise,
+                "chaos",
+                "playbooks",
+                "history",
+                normalized_id,
+                f"{version_id}.yml",
+            )
+            version_path.write_text(current)
     playbook_path.write_text(serialized)
     return normalized
 
@@ -371,13 +404,13 @@ def restore_playbook_version(
         raise ValueError("Invalid playbook id")
     if not re.fullmatch(PLAYBOOK_VERSION_PATTERN, version_id):
         raise ValueError("Invalid playbook version")
-    version_path = (
-        Path(exercise.package_path)
-        / "chaos"
-        / "playbooks"
-        / "history"
-        / playbook_id
-        / f"{version_id}.yml"
+    version_path = exercise_package_path(
+        exercise,
+        "chaos",
+        "playbooks",
+        "history",
+        playbook_id,
+        f"{version_id}.yml",
     )
     try:
         configuration = version_path.read_text()
@@ -484,7 +517,11 @@ def _validate_option(
 
 
 def _control_metadata(exercise: Exercise) -> dict[str, Any] | None:
-    metadata_path = Path(exercise.package_path) / "chaos" / "control.json"
+    metadata_path = exercise_package_path(
+        exercise,
+        "chaos",
+        "control.json",
+    )
     try:
         return json.loads(metadata_path.read_text())
     except (FileNotFoundError, json.JSONDecodeError, OSError):
@@ -551,7 +588,11 @@ def _request_json(
             raise ChaosPreflightError(detail) from exc
         raise ChaosExecutionError(detail) from exc
     except (OSError, URLError, json.JSONDecodeError) as exc:
-        raise ChaosExecutionError(f"Chaos controller request failed: {exc}") from exc
+        LOGGER.warning(
+            "Chaos controller request failed (%s)",
+            type(exc).__name__,
+        )
+        raise ChaosExecutionError("Chaos controller request failed") from exc
 
 
 def _http_error_detail(error: HTTPError) -> str:
@@ -563,8 +604,8 @@ def _http_error_detail(error: HTTPError) -> str:
 
 
 def _safe_script_path(exercise: Exercise, script_name: str) -> Path:
-    chaos_root = Path(exercise.package_path).resolve() / "chaos"
-    script = (chaos_root / script_name).resolve()
+    chaos_root = exercise_package_path(exercise, "chaos")
+    script = exercise_package_path(exercise, "chaos", script_name)
     if script.parent != chaos_root or script.suffix != ".py":
         raise ValueError("Invalid chaos script path")
     if not script.is_file():

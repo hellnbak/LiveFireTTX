@@ -10,9 +10,16 @@ The v1.0 release candidate was prepared with the following controls:
 - Updated the license summary to reference LiveFireTTX and substantially similar live-fire tabletop / exercise orchestration products rather than unrelated project names.
 - Confirmed the Python package compiles successfully.
 - Added path-contained, schema-aware backup and restore validation.
+- Derived exercise package access from the configured generated-data root,
+  normalized paths with symlink-aware containment checks, and stopped trusting
+  persisted package paths for filesystem access.
+- Replaced path-based download responses with bounded in-memory archives that
+  reject symbolic links and oversized package trees.
 - Added localhost-only controller configuration validation.
 - Added trusted-host, same-origin mutation, and browser security-header
   enforcement for the facilitator interface.
+- Canonicalized post-action redirects as validated relative URLs and removed
+  exception and local-path details from public health responses.
 - Added CI lint, type, coverage, dependency audit, secret scan, package-build,
   generated Docker smoke, and CodeQL workflows.
 - Added a documented threat model and release checklist.

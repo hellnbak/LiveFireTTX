@@ -32,6 +32,8 @@ All notable changes to LiveFireTTX are documented here.
 - Added ZIP traversal, symlink, schema-version, and database-integrity checks
 - Preserved localhost-only controller configuration and generated service binds,
   with an explicit container-host bridge opt-in
+- Added generated-root path containment, symlink-safe package downloads,
+  validated relative redirects, and public error-detail redaction
 
 ## 0.6.0
 

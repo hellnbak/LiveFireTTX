@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -12,6 +13,43 @@ from app.main import app
 
 
 class ApplicationRouteTests(TestCase):
+    def test_readiness_does_not_expose_exception_or_path_details(self) -> None:
+        class UnavailableStorage:
+            def mkdir(self, **kwargs) -> None:
+                raise PermissionError("secret path: /private/generated")
+
+        with TemporaryDirectory() as temporary:
+            with patch.object(
+                models,
+                "DB_PATH",
+                Path(temporary) / "livefirettx.db",
+            ):
+                with TestClient(app) as client:
+                    with (
+                        patch(
+                            "app.routes.system.database_health",
+                            return_value={
+                                "healthy": False,
+                                "schema_version": 0,
+                                "error": "secret database error",
+                                "path": "/private/database.db",
+                            },
+                        ),
+                        patch(
+                            "app.routes.system.settings",
+                            SimpleNamespace(generated_root=UnavailableStorage()),
+                        ),
+                    ):
+                        response = client.get("/readyz")
+
+        self.assertEqual(503, response.status_code)
+        self.assertNotIn("secret", response.text)
+        self.assertNotIn("/private", response.text)
+        self.assertEqual(
+            "Database health check failed",
+            response.json()["database"]["error"],
+        )
+
     def test_health_and_guided_setup_routes(self) -> None:
         with TemporaryDirectory() as temporary:
             with patch.object(
@@ -98,6 +136,7 @@ class ApplicationRouteTests(TestCase):
             root = Path(temporary)
             with (
                 patch.object(models, "DB_PATH", root / "livefirettx.db"),
+                patch.object(models, "GENERATED_ROOT", root / "exercises"),
                 patch(
                     "app.services.generator.GENERATED_ROOT",
                     root / "exercises",
@@ -119,6 +158,10 @@ class ApplicationRouteTests(TestCase):
                         follow_redirects=False,
                     )
                     self.assertEqual(303, response.status_code)
+                    self.assertRegex(
+                        response.headers["location"],
+                        r"^/exercises/ttx_[a-f0-9]{12}$",
+                    )
                     exercise = models.list_exercises()[0]
                     briefs = (
                         Path(exercise.package_path)

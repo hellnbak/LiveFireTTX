@@ -26,6 +26,7 @@ from app.services.lab_renderer import (
     render_target_environment,
     write_executable,
 )
+from app.services.paths import exercise_package_root, new_exercise_package_path
 
 
 def create_exercise_from_request(
@@ -36,7 +37,7 @@ def create_exercise_from_request(
 
     scenario = SCENARIO_LIBRARY[request.scenario_type]
     exercise_id = new_id("ttx")
-    package_path = GENERATED_ROOT / exercise_id
+    package_path = new_exercise_package_path(exercise_id, GENERATED_ROOT)
     objectives = request.objectives or scenario["default_objectives"]
     participants = request.participants or scenario["recommended_roles"]
 
@@ -97,7 +98,7 @@ def build_inject_options(exercise: Exercise) -> list[InjectOption]:
                 "said externally."
             ),
             "artifact",
-            {"artifact": "customer_complaint.md"},
+            {"artifact": "artifacts/customer_complaint.md"},
         ),
     ]
 
@@ -456,7 +457,7 @@ def render_exercise_package(
     exercise: Exercise,
     injects: list[InjectOption],
 ) -> None:
-    root = Path(exercise.package_path)
+    root = exercise_package_root(exercise, generated_root=GENERATED_ROOT)
     for directory in [
         "target/app",
         "chaos",

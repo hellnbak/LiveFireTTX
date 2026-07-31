@@ -6,14 +6,13 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlparse, urlsplit
 import json
 import logging
 import uuid
 
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import (
-    FileResponse,
     HTMLResponse,
     JSONResponse,
     RedirectResponse,
@@ -24,6 +23,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.models import (
+    Exercise,
     ExerciseCreate,
     InjectOption,
     SCENARIO_LIBRARY,
@@ -77,8 +77,14 @@ from app.services.runtime import (
     validate_playbook_configuration,
 )
 from app.services.packages import (
+    build_exercise_archive,
     dependency_map,
     list_participant_briefs,
+)
+from app.services.paths import (
+    PackagePathError,
+    exercise_package_path,
+    validate_exercise_id,
 )
 from app.version import __version__
 
@@ -106,6 +112,27 @@ templates.env.globals["app_version"] = __version__
 app.mount("/static", StaticFiles(directory=str(BASE / "templates" / "static")), name="static")
 app.include_router(system_router)
 app.include_router(packages_router)
+
+
+@app.exception_handler(PackagePathError)
+async def unsafe_package_path_handler(
+    request: Request,
+    error: PackagePathError,
+) -> JSONResponse:
+    LOGGER.warning(
+        json.dumps(
+            {
+                "event": "unsafe_package_path_rejected",
+                "path": request.url.path,
+                "error_type": type(error).__name__,
+            },
+            sort_keys=True,
+        )
+    )
+    return JSONResponse(
+        {"detail": "Exercise package metadata is invalid"},
+        status_code=409,
+    )
 
 
 async def _form_fields(
@@ -150,6 +177,22 @@ def _integer_field(
         return int(_field(fields, name, str(default)))
     except ValueError as exc:
         raise HTTPException(422, f"{name} must be an integer") from exc
+
+
+def _redirect_to_exercise(exercise: Exercise) -> RedirectResponse:
+    exercise_id = validate_exercise_id(exercise.id)
+    target = f"/exercises/{quote(exercise_id, safe='')}".replace("\\", "")
+    parsed = urlparse(target)
+    if (
+        parsed.scheme
+        or parsed.netloc
+        or not parsed.path.startswith("/exercises/ttx_")
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
+        target = "/"
+    return RedirectResponse(target, status_code=303)
 
 
 def _same_local_origin(request: Request, origin: str) -> bool:
@@ -338,8 +381,13 @@ async def create_exercise(request: Request):
     ex, injects = create_exercise_from_request(req)
     save_exercise(ex)
     save_injects(injects)
-    add_event(ex.id, "exercise_created", "Exercise Created", f"Generated package at {ex.package_path}")
-    return RedirectResponse(f"/exercises/{ex.id}", status_code=303)
+    add_event(
+        ex.id,
+        "exercise_created",
+        "Exercise Created",
+        "Generated the local exercise package",
+    )
+    return _redirect_to_exercise(ex)
 
 
 @app.get("/exercises/{exercise_id}", response_class=HTMLResponse)
@@ -463,7 +511,7 @@ async def trigger_inject(
             f"\nGuardrails: {guardrail_profile}"
         )
     add_event(ex.id, "inject_triggered", inj.title, f"{detail}\n{result}")
-    return RedirectResponse(f"/exercises/{inj.exercise_id}", status_code=303)
+    return _redirect_to_exercise(ex)
 
 
 @app.post("/exercises/{exercise_id}/chaos/reset")
@@ -483,7 +531,7 @@ async def reset_exercise_chaos(request: Request, exercise_id: str):
 
     label = action or "all actions"
     add_event(ex.id, "chaos_reset", "Chaos State Reset", f"Reset: {label}\n{result}")
-    return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
+    return _redirect_to_exercise(ex)
 
 
 @app.post("/exercises/{exercise_id}/chaos/emergency-stop")
@@ -508,7 +556,7 @@ def emergency_stop_exercise_chaos(exercise_id: str):
         "Emergency Stop",
         result,
     )
-    return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
+    return _redirect_to_exercise(ex)
 
 
 @app.get("/exercises/{exercise_id}/chaos/status")
@@ -562,7 +610,7 @@ async def assess_exercise_objective(
         f"Objective Assessed: {ex.objectives[objective_index]}",
         f"Rating: {RATING_LABELS[rating]}\nNotes: {notes or 'None'}",
     )
-    return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
+    return _redirect_to_exercise(ex)
 
 
 @app.get("/exercises/{exercise_id}/reports/after-action.md")
@@ -577,7 +625,11 @@ def download_after_action_report(exercise_id: str):
         events,
         chaos_state,
     )
-    report_path = Path(ex.package_path) / "reports" / "after_action_report.md"
+    report_path = exercise_package_path(
+        ex,
+        "reports",
+        "after_action_report.md",
+    )
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(report)
     return Response(
@@ -585,7 +637,7 @@ def download_after_action_report(exercise_id: str):
         media_type="text/markdown",
         headers={
             "Content-Disposition": (
-                f'attachment; filename="{exercise_id}-after-action.md"'
+                f'attachment; filename="{ex.id}-after-action.md"'
             )
         },
     )
@@ -603,7 +655,11 @@ def download_evidence_package(exercise_id: str):
         events,
         chaos_state,
     )
-    archive_path = Path(ex.package_path) / "reports" / "evidence_package.zip"
+    archive_path = exercise_package_path(
+        ex,
+        "reports",
+        "evidence_package.zip",
+    )
     archive_path.parent.mkdir(parents=True, exist_ok=True)
     archive_path.write_bytes(archive)
     return Response(
@@ -611,7 +667,7 @@ def download_evidence_package(exercise_id: str):
         media_type="application/zip",
         headers={
             "Content-Disposition": (
-                f'attachment; filename="{exercise_id}-evidence.zip"'
+                f'attachment; filename="{ex.id}-evidence.zip"'
             )
         },
     )
@@ -646,7 +702,7 @@ async def save_exercise_playbook(
         f"Playbook Saved: {playbook['name']}",
         f"ID: {playbook['id']}\nStages: {len(playbook['stages'])}",
     )
-    return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
+    return _redirect_to_exercise(ex)
 
 
 @app.post("/exercises/{exercise_id}/playbooks/designer/validate")
@@ -728,7 +784,7 @@ async def clone_exercise_playbook(
         f"Playbook Cloned: {clone['name']}",
         f"Source: {playbook_id}\nClone: {clone['id']}",
     )
-    return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
+    return _redirect_to_exercise(ex)
 
 
 @app.post("/exercises/{exercise_id}/playbooks/import")
@@ -766,7 +822,7 @@ async def import_exercise_playbook(
         f"Playbook Imported: {playbook['name']}",
         f"File: {filename}\nID: {playbook['id']}",
     )
-    return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
+    return _redirect_to_exercise(ex)
 
 
 @app.get("/exercises/{exercise_id}/playbooks/{playbook_id}/export.yml")
@@ -819,7 +875,7 @@ def restore_exercise_playbook_version(
         f"Playbook Restored: {playbook['name']}",
         f"Version: {version_id}",
     )
-    return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
+    return _redirect_to_exercise(ex)
 
 
 @app.post("/exercises/{exercise_id}/playbooks/{playbook_id}/start")
@@ -841,7 +897,7 @@ def start_exercise_playbook(exercise_id: str, playbook_id: str):
         f"Playbook Started: {playbook_run['name']}",
         f"Run: {playbook_run['id']}\nSeed: {playbook_run['seed']}",
     )
-    return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
+    return _redirect_to_exercise(ex)
 
 
 @app.post(
@@ -873,7 +929,7 @@ def control_exercise_playbook(
         f"Playbook {command.title()}",
         f"Run: {result['id']}\nStatus: {result['status']}",
     )
-    return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
+    return _redirect_to_exercise(ex)
 
 
 @app.post(
@@ -904,7 +960,7 @@ def skip_exercise_playbook_stage(
         f"Playbook Stage Skipped: {stage['title']}",
         f"Run: {playbook_run_id}\nStage: {stage_id}",
     )
-    return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
+    return _redirect_to_exercise(ex)
 
 
 @app.post("/exercises/{exercise_id}/artifacts")
@@ -930,7 +986,12 @@ async def create_exercise_artifact(
             artifact_kind,
             content,
         )
-    except (OSError, ValueError) as exc:
+    except PackagePathError:
+        raise
+    except OSError as exc:
+        LOGGER.warning("Failed to write a safe exercise artifact")
+        raise HTTPException(500, "Exercise artifact could not be written") from exc
+    except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     save_injects([inject])
     add_event(
@@ -943,7 +1004,7 @@ async def create_exercise_artifact(
             f"Path: {inject.payload['artifact']}"
         ),
     )
-    return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
+    return _redirect_to_exercise(ex)
 
 
 @app.post("/exercises/{exercise_id}/events")
@@ -959,7 +1020,7 @@ async def add_manual_event(request: Request, exercise_id: str):
     if not detail or len(detail) > 5000:
         raise HTTPException(400, "Event detail must be between 1 and 5000 characters")
     add_event(exercise_id, "manual_note", title, detail)
-    return RedirectResponse(f"/exercises/{exercise_id}", status_code=303)
+    return _redirect_to_exercise(ex)
 
 
 @app.get("/exercises/{exercise_id}/download")
@@ -967,6 +1028,11 @@ def download_exercise(exercise_id: str):
     ex = get_exercise(exercise_id)
     if not ex:
         raise HTTPException(404, "Exercise not found")
-    import shutil
-    archive = shutil.make_archive(str(Path(ex.package_path)), "zip", root_dir=ex.package_path)
-    return FileResponse(archive, filename=f"{exercise_id}.zip", media_type="application/zip")
+    archive = build_exercise_archive(ex)
+    return Response(
+        archive,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{ex.id}.zip"',
+        },
+    )

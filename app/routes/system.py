@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import logging
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, Response
@@ -12,6 +13,7 @@ from app.version import __version__
 
 
 router = APIRouter(tags=["system"])
+LOGGER = logging.getLogger("livefirettx.system")
 
 
 @router.get("/healthz")
@@ -22,19 +24,28 @@ def health() -> dict[str, object]:
 @router.get("/readyz")
 def readiness() -> JSONResponse:
     database = database_health()
-    generated_error = None
+    generated_ready = True
     try:
         settings.generated_root.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
-        generated_error = str(exc)
-    ready = bool(database.get("healthy")) and generated_error is None
+        LOGGER.warning(
+            "Generated package storage check failed (%s)",
+            type(exc).__name__,
+        )
+        generated_ready = False
+    database_status: dict[str, object] = {
+        "healthy": bool(database.get("healthy")),
+        "schema_version": int(database.get("schema_version", 0)),
+    }
+    if not database_status["healthy"]:
+        database_status["error"] = "Database health check failed"
+    ready = bool(database_status["healthy"]) and generated_ready
     return JSONResponse(
         {
             "ready": ready,
             "version": __version__,
-            "database": database,
-            "generated_root": str(settings.generated_root),
-            "generated_root_error": generated_error,
+            "database": database_status,
+            "generated_storage_ready": generated_ready,
         },
         status_code=200 if ready else 503,
     )
