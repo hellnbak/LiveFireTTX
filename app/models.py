@@ -16,7 +16,7 @@ from app.config import settings
 
 DB_PATH = settings.database_path
 GENERATED_ROOT = settings.generated_root
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 SCENARIO_LIBRARY: Dict[str, Dict[str, Any]] = {
@@ -196,6 +196,10 @@ class Exercise:
     status: str
     created_at: str
     package_path: str
+    started_at: Optional[str] = None
+    paused_at: Optional[str] = None
+    paused_seconds: int = 0
+    completed_at: Optional[str] = None
 
 
 @dataclass
@@ -212,6 +216,8 @@ class InjectOption:
     triggered: bool = False
     triggered_at: Optional[str] = None
     trigger_count: int = 0
+    scheduled_offset_seconds: Optional[int] = None
+    auto_deliver: bool = False
 
 
 def connect() -> sqlite3.Connection:
@@ -243,6 +249,7 @@ def init_db() -> None:
         migrations = {
             1: _migration_1_initial_schema,
             2: _migration_2_trigger_count,
+            3: _migration_3_facilitator_operations,
         }
         for version, migration in migrations.items():
             if version in applied:
@@ -332,6 +339,36 @@ def _migration_2_trigger_count(conn: sqlite3.Connection) -> None:
         )
 
 
+def _migration_3_facilitator_operations(conn: sqlite3.Connection) -> None:
+    exercise_columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(exercises)").fetchall()
+    }
+    exercise_additions = {
+        "started_at": "TEXT",
+        "paused_at": "TEXT",
+        "paused_seconds": "INTEGER NOT NULL DEFAULT 0",
+        "completed_at": "TEXT",
+    }
+    for column, definition in exercise_additions.items():
+        if column not in exercise_columns:
+            conn.execute(f"ALTER TABLE exercises ADD COLUMN {column} {definition}")
+
+    inject_columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(inject_options)").fetchall()
+    }
+    inject_additions = {
+        "scheduled_offset_seconds": "INTEGER",
+        "auto_deliver": "INTEGER NOT NULL DEFAULT 0",
+    }
+    for column, definition in inject_additions.items():
+        if column not in inject_columns:
+            conn.execute(
+                f"ALTER TABLE inject_options ADD COLUMN {column} {definition}"
+            )
+
+
 def database_schema_version() -> int:
     with connect() as conn:
         row = conn.execute(
@@ -384,6 +421,10 @@ def row_to_exercise(row: sqlite3.Row) -> Exercise:
         status=row["status"],
         created_at=row["created_at"],
         package_path=row["package_path"],
+        started_at=row["started_at"],
+        paused_at=row["paused_at"],
+        paused_seconds=row["paused_seconds"],
+        completed_at=row["completed_at"],
     )
 
 
@@ -401,6 +442,8 @@ def row_to_inject(row: sqlite3.Row) -> InjectOption:
         triggered=bool(row["triggered"]),
         triggered_at=row["triggered_at"],
         trigger_count=row["trigger_count"],
+        scheduled_offset_seconds=row["scheduled_offset_seconds"],
+        auto_deliver=bool(row["auto_deliver"]),
     )
 
 
@@ -408,7 +451,24 @@ def save_exercise(ex: Exercise) -> None:
     with connect() as conn:
         conn.execute(
             """
-            INSERT INTO exercises VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO exercises (
+                id,
+                name,
+                scenario_type,
+                platform,
+                business_system,
+                difficulty,
+                duration_minutes,
+                participants,
+                objectives,
+                status,
+                created_at,
+                package_path,
+                started_at,
+                paused_at,
+                paused_seconds,
+                completed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 ex.id,
@@ -423,6 +483,10 @@ def save_exercise(ex: Exercise) -> None:
                 ex.status,
                 ex.created_at,
                 ex.package_path,
+                ex.started_at,
+                ex.paused_at,
+                ex.paused_seconds,
+                ex.completed_at,
             ),
         )
         conn.commit()
@@ -445,8 +509,10 @@ def save_injects(injects: List[InjectOption]) -> None:
                     payload,
                     triggered,
                     triggered_at,
-                    trigger_count
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    trigger_count,
+                    scheduled_offset_seconds,
+                    auto_deliver
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     inj.id,
@@ -461,6 +527,8 @@ def save_injects(injects: List[InjectOption]) -> None:
                     1 if inj.triggered else 0,
                     inj.triggered_at,
                     inj.trigger_count,
+                    inj.scheduled_offset_seconds,
+                    1 if inj.auto_deliver else 0,
                 ),
             )
         conn.commit()
@@ -504,6 +572,124 @@ def mark_inject_triggered(inject_id: str) -> None:
             (now, inject_id),
         )
         conn.commit()
+
+
+def update_exercise_clock(
+    exercise_id: str,
+    expected_status: str,
+    *,
+    status: str,
+    started_at: Optional[str],
+    paused_at: Optional[str],
+    paused_seconds: int,
+    completed_at: Optional[str],
+) -> bool:
+    with connect() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE exercises
+            SET status = ?,
+                started_at = ?,
+                paused_at = ?,
+                paused_seconds = ?,
+                completed_at = ?
+            WHERE id = ? AND status = ?
+            """,
+            (
+                status,
+                started_at,
+                paused_at,
+                paused_seconds,
+                completed_at,
+                exercise_id,
+                expected_status,
+            ),
+        )
+        conn.commit()
+    return cursor.rowcount == 1
+
+
+def set_inject_schedule(
+    inject_id: str,
+    offset_seconds: int,
+    auto_deliver: bool,
+) -> None:
+    with connect() as conn:
+        conn.execute(
+            """
+            UPDATE inject_options
+            SET scheduled_offset_seconds = ?, auto_deliver = ?
+            WHERE id = ?
+            """,
+            (offset_seconds, 1 if auto_deliver else 0, inject_id),
+        )
+        conn.commit()
+
+
+def clear_inject_schedule(inject_id: str) -> None:
+    with connect() as conn:
+        conn.execute(
+            """
+            UPDATE inject_options
+            SET scheduled_offset_seconds = NULL, auto_deliver = 0
+            WHERE id = ?
+            """,
+            (inject_id,),
+        )
+        conn.commit()
+
+
+def deliver_scheduled_inject(inject_id: str, elapsed_seconds: int) -> bool:
+    delivered_at = timestamp()
+    with connect() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE inject_options
+            SET triggered = 1,
+                triggered_at = ?,
+                trigger_count = trigger_count + 1
+            WHERE id = ?
+              AND action_type = 'narrative'
+              AND triggered = 0
+              AND auto_deliver = 1
+              AND scheduled_offset_seconds IS NOT NULL
+              AND EXISTS (
+                  SELECT 1
+                  FROM exercises
+                  WHERE exercises.id = inject_options.exercise_id
+                    AND exercises.status = 'running'
+              )
+            """,
+            (delivered_at, inject_id),
+        )
+        if cursor.rowcount != 1:
+            return False
+        inject = conn.execute(
+            """
+            SELECT exercise_id, title, audience
+            FROM inject_options
+            WHERE id = ?
+            """,
+            (inject_id,),
+        ).fetchone()
+        if not inject:
+            raise RuntimeError("Scheduled inject disappeared during delivery")
+        conn.execute(
+            "INSERT INTO run_events VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                new_id("evt"),
+                inject["exercise_id"],
+                "scheduled_inject_delivered",
+                inject["title"],
+                (
+                    f"Audience: {inject['audience']}\n"
+                    f"Delivered automatically at T+{elapsed_seconds} seconds"
+                ),
+                delivered_at,
+            ),
+        )
+        conn.commit()
+    return True
 
 
 def add_event(exercise_id: str, event_type: str, title: str, detail: str) -> None:

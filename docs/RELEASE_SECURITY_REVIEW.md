@@ -1,5 +1,33 @@
 # Release Security Review
 
+## v1.1 Facilitator Operations Delta
+
+Date: 2026-07-31
+
+The v1.1 facilitator clock and narrative scheduler were reviewed with the
+following controls:
+
+- Schema migration 3 is additive and preserves existing exercises, packages,
+  and evidence.
+- Automatic scheduling is limited to existing narrative inject records; it
+  cannot invoke chaos actions, playbooks, commands, targets, or file paths.
+- Clock and schedule mutations use same-origin-protected POST routes, while
+  status reads remain side-effect free.
+- Due-inject delivery is transactional, rechecks that the exercise is running,
+  and records one delivery event to prevent duplicate dispatch.
+- Paused, completed, and reset exercises cannot receive automatic deliveries.
+- Operators can disable the scheduler without discarding configured schedules
+  by setting `LIVEFIRE_SCHEDULER_ENABLED=false`.
+- Clock transitions, schedule changes, and automatic deliveries are retained in
+  the exercise event log and exported evidence manifest.
+- Lifecycle, pause-freeze, duplicate-delivery, scheduler configuration, route,
+  and evidence behavior are covered by automated tests.
+
+The existing local-only deployment boundary and generated-controller safety
+controls remain unchanged.
+
+## v1.0 Release Review
+
 Date: 2026-07-30
 
 The v1.0 release candidate was prepared with the following controls:

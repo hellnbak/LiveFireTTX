@@ -75,6 +75,8 @@ def build_inject_options(exercise: Exercise) -> list[InjectOption]:
             ),
             "narrative",
             {"severity": "medium"},
+            scheduled_offset_minutes=0,
+            auto_deliver=True,
         ),
         _inject(
             exercise,
@@ -87,6 +89,8 @@ def build_inject_options(exercise: Exercise) -> list[InjectOption]:
             ),
             "narrative",
             {"pressure": "executive"},
+            scheduled_offset_minutes=20,
+            auto_deliver=True,
         ),
         _inject(
             exercise,
@@ -391,6 +395,8 @@ def _inject(
     action_type: str,
     payload: dict[str, object],
     script_name: str | None = None,
+    scheduled_offset_minutes: int | None = None,
+    auto_deliver: bool = False,
 ) -> InjectOption:
     return InjectOption(
         id=new_id("inj"),
@@ -402,6 +408,12 @@ def _inject(
         action_type=action_type,
         script_name=script_name,
         payload=payload,
+        scheduled_offset_seconds=(
+            scheduled_offset_minutes * 60
+            if scheduled_offset_minutes is not None
+            else None
+        ),
+        auto_deliver=auto_deliver,
     )
 
 

@@ -11,6 +11,7 @@ import csv
 import json
 
 from app.models import Exercise, InjectOption
+from app.services.facilitator import clock_snapshot
 
 
 RATING_SCORES = {
@@ -251,6 +252,7 @@ def render_evidence_markdown(
     chaos_state: dict[str, Any] | None,
 ) -> str:
     state = chaos_state or {}
+    clock = clock_snapshot(exercise)
     lines = [
         f"# After Action Evidence: {exercise.name}",
         "",
@@ -259,6 +261,10 @@ def render_evidence_markdown(
         f"- Scenario: {exercise.scenario_type}",
         f"- Business system: {exercise.business_system}",
         f"- Planned duration: {exercise.duration_minutes} minutes",
+        f"- Lifecycle status: {clock['status']}",
+        f"- Recorded exercise time: {clock['elapsed_seconds']} seconds",
+        f"- Started: {clock['started_at'] or 'Not started'}",
+        f"- Completed: {clock['completed_at'] or 'Not completed'}",
         f"- Generated: {datetime.now(timezone.utc).isoformat()}",
         "",
         "## Readiness Summary",
@@ -352,6 +358,7 @@ def build_evidence_archive(
     chaos_state: dict[str, Any] | None,
 ) -> bytes:
     state = chaos_state or {}
+    clock = clock_snapshot(exercise)
     event_rows = [_row_dict(event) for event in events]
     markdown = render_evidence_markdown(
         exercise,
@@ -366,8 +373,15 @@ def build_evidence_archive(
             "manifest.json",
             json.dumps(
                 {
-                    "schema_version": 1,
+                    "schema_version": 2,
                     "exercise_id": exercise.id,
+                    "exercise_clock": {
+                        "status": clock["status"],
+                        "started_at": clock["started_at"],
+                        "completed_at": clock["completed_at"],
+                        "elapsed_seconds": clock["elapsed_seconds"],
+                        "planned_duration_seconds": clock["duration_seconds"],
+                    },
                     "generated_at": datetime.now(timezone.utc).isoformat(),
                     "files": [
                         "after_action_report.md",

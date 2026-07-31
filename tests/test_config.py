@@ -23,6 +23,8 @@ class ConfigurationTests(TestCase):
             settings.generated_root,
         )
         self.assertEqual(expected_root / "backups", settings.backup_root)
+        self.assertTrue(settings.scheduler_enabled)
+        self.assertEqual(2, settings.scheduler_interval_seconds)
 
     def test_data_root_sets_all_default_storage_paths(self) -> None:
         with patch.dict(
@@ -48,6 +50,8 @@ class ConfigurationTests(TestCase):
                 "LIVEFIRE_GENERATED_ROOT": "/tmp/livefire/exercises",
                 "LIVEFIRE_CONTROL_URL": "http://localhost:9000/",
                 "LIVEFIRE_REQUEST_TIMEOUT_SECONDS": "7",
+                "LIVEFIRE_SCHEDULER_ENABLED": "false",
+                "LIVEFIRE_SCHEDULER_INTERVAL_SECONDS": "5",
             },
             clear=True,
         ):
@@ -58,6 +62,19 @@ class ConfigurationTests(TestCase):
         )
         self.assertEqual("http://localhost:9000", settings.control_url)
         self.assertEqual(7, settings.request_timeout_seconds)
+        self.assertFalse(settings.scheduler_enabled)
+        self.assertEqual(5, settings.scheduler_interval_seconds)
+
+    def test_rejects_invalid_scheduler_configuration(self) -> None:
+        for environment in [
+            {"LIVEFIRE_SCHEDULER_ENABLED": "sometimes"},
+            {"LIVEFIRE_SCHEDULER_INTERVAL_SECONDS": "0"},
+            {"LIVEFIRE_SCHEDULER_INTERVAL_SECONDS": "fast"},
+        ]:
+            with self.subTest(environment=environment):
+                with patch.dict("os.environ", environment, clear=True):
+                    with self.assertRaises(ValueError):
+                        load_settings()
 
     def test_rejects_non_local_control_url(self) -> None:
         for control_url in [

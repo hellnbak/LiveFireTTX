@@ -60,7 +60,7 @@ class ApplicationRouteTests(TestCase):
                 with TestClient(app) as client:
                     health = client.get("/healthz")
                     self.assertEqual(200, health.status_code)
-                    self.assertEqual("1.0.0", health.json()["version"])
+                    self.assertEqual("1.1.0", health.json()["version"])
                     self.assertTrue(health.json()["healthy"])
                     self.assertTrue(health.headers["x-request-id"])
                     self.assertEqual(
@@ -174,3 +174,66 @@ class ApplicationRouteTests(TestCase):
                     )
                     self.assertEqual(200, brief.status_code)
                     self.assertIn("SIMULATED", brief.text.upper())
+
+    def test_facilitator_clock_controls_and_auto_delivery(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with (
+                patch.object(models, "DB_PATH", root / "livefirettx.db"),
+                patch.object(models, "GENERATED_ROOT", root / "exercises"),
+                patch(
+                    "app.services.generator.GENERATED_ROOT",
+                    root / "exercises",
+                ),
+            ):
+                with TestClient(app) as client:
+                    created = client.post(
+                        "/exercises",
+                        data={
+                            "name": "Operations exercise",
+                            "scenario_type": "cloud_outage",
+                            "platform": "local_docker",
+                            "business_system": "Commerce",
+                            "difficulty": "intermediate",
+                            "duration_minutes": "60",
+                            "participants": "Incident Commander, SRE",
+                            "objectives": "Assess impact",
+                        },
+                        follow_redirects=False,
+                    )
+                    exercise = models.list_exercises()[0]
+
+                    detail = client.get(created.headers["location"])
+                    self.assertEqual(200, detail.status_code)
+                    self.assertIn("Facilitator Clock", detail.text)
+                    self.assertIn("Scheduled Delivery", detail.text)
+
+                    started = client.post(
+                        f"/exercises/{exercise.id}/clock/start",
+                        follow_redirects=False,
+                    )
+                    self.assertEqual(303, started.status_code)
+                    self.assertEqual("running", models.get_exercise(exercise.id).status)
+                    opening = next(
+                        inject
+                        for inject in models.get_injects(exercise.id)
+                        if inject.title == "Initial Situation Brief"
+                    )
+                    self.assertTrue(opening.triggered)
+                    self.assertEqual(1, opening.trigger_count)
+
+                    for command, expected_status in [
+                        ("pause", "paused"),
+                        ("resume", "running"),
+                        ("complete", "completed"),
+                        ("reset", "created"),
+                    ]:
+                        response = client.post(
+                            f"/exercises/{exercise.id}/clock/{command}",
+                            follow_redirects=False,
+                        )
+                        self.assertEqual(303, response.status_code)
+                        self.assertEqual(
+                            expected_status,
+                            models.get_exercise(exercise.id).status,
+                        )

@@ -45,6 +45,8 @@ class Settings:
     request_timeout_seconds: int
     backup_root: Path
     allow_container_host: bool
+    scheduler_enabled: bool
+    scheduler_interval_seconds: int
 
 
 def load_settings() -> Settings:
@@ -101,6 +103,11 @@ def load_settings() -> Settings:
         ),
         backup_root=backup_root,
         allow_container_host=allow_container_host,
+        scheduler_enabled=_boolean("LIVEFIRE_SCHEDULER_ENABLED", True),
+        scheduler_interval_seconds=_positive_int(
+            "LIVEFIRE_SCHEDULER_INTERVAL_SECONDS",
+            2,
+        ),
     )
 
 

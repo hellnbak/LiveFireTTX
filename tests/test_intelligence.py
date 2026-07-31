@@ -78,6 +78,8 @@ class ExerciseIntelligenceTests(TestCase):
             state,
         )
         self.assertIn("# After Action Evidence: Intelligence Test", markdown)
+        self.assertIn("- Lifecycle status: created", markdown)
+        self.assertIn("- Recorded exercise time: 0 seconds", markdown)
         self.assertIn("## Chaos Run Comparison", markdown)
         self.assertIn("app_degradation", markdown)
 
@@ -102,7 +104,11 @@ class ExerciseIntelligenceTests(TestCase):
             events_csv = archive.read("events.csv").decode()
             self.assertIn("'=unsafe spreadsheet formula", events_csv)
             self.assertIn(
-                '"schema_version": 1',
+                '"schema_version": 2',
+                archive.read("manifest.json").decode(),
+            )
+            self.assertIn(
+                '"exercise_clock"',
                 archive.read("manifest.json").decode(),
             )
 

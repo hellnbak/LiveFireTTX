@@ -42,12 +42,18 @@ Controls: visible simulation watermarks, immutable playbook snapshots and seeds,
 explicit facilitator ratings, provisional score labeling, retained reset/abort
 events, and formula-safe CSV export.
 
+### Unattended Scheduled Actions
+
+Controls: automatic scheduling is limited to non-executable narrative injects,
+delivery is atomic and idempotent, pause/completion states block dispatch, and
+every schedule change and delivery is retained in the exercise event log.
+
 ### Local Web Exposure
 
 Controls: documented localhost operation, container port binding to 127.0.0.1,
 trusted-host validation, same-origin enforcement for state changes, defensive
 response headers, request identifiers, and no v1 remote-controller
-configuration. v1.0 does not claim multi-user authentication; operators must
+configuration. v1.1 does not claim multi-user authentication; operators must
 not expose the facilitator application to untrusted networks.
 
 ## Out of Scope
