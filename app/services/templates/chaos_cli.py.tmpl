@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.request
+
+from engine import (
+    abort,
+    activate_run,
+    available_actions,
+    begin_run,
+    fail_run,
+    get_state,
+    observe_run,
+    reset,
+)
+
+
+EXERCISE_ID = "__EXERCISE_ID__"
+TARGET_URL = os.environ.get("LIVEFIRE_TARGET_URL", "http://127.0.0.1:8088")
+
+
+def target_snapshot():
+    started = time.monotonic()
+    try:
+        with urllib.request.urlopen(f"{TARGET_URL}/health", timeout=1) as response:
+            payload = json.loads(response.read())
+        return {
+            "reachable": True,
+            "matches_exercise": payload.get("exercise_id") == EXERCISE_ID,
+            "response_time_ms": round((time.monotonic() - started) * 1000, 2),
+            **payload,
+        }
+    except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+        return {
+            "reachable": False,
+            "matches_exercise": False,
+            "response_time_ms": round((time.monotonic() - started) * 1000, 2),
+            "error": str(exc),
+        }
+
+
+def run_action(args):
+    pending = begin_run(
+        args.action,
+        args.intensity,
+        args.duration,
+        {
+            "max_latency_ms": args.max_latency_ms,
+            "max_error_rate": args.max_error_rate,
+            "abort_on_target_unreachable": not args.allow_target_unreachable,
+        },
+    )
+    snapshot = target_snapshot()
+    if args.skip_preflight:
+        snapshot["preflight_bypassed"] = True
+    elif not snapshot["reachable"] or not snapshot["matches_exercise"]:
+        fail_run(pending["id"], "target_preflight_failed", snapshot)
+        raise ValueError("Target preflight failed; deploy and validate this exercise")
+
+    result = activate_run(pending["id"], snapshot)
+    after = target_snapshot()
+    observe_run(pending["id"], "after_apply", after)
+    result["before_snapshot"] = snapshot
+    result["after_snapshot"] = after
+    return result
+
+
+def main():
+    parser = argparse.ArgumentParser(description="LiveFireTTX guarded chaos control")
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("list", help="List scenario-scoped actions")
+    commands.add_parser("state", help="Show current state and run lifecycle")
+    commands.add_parser("preflight", help="Check the generated target")
+
+    run_parser = commands.add_parser("run", help="Start a timed chaos run")
+    run_parser.add_argument("action")
+    run_parser.add_argument(
+        "--intensity",
+        choices=["low", "medium", "high"],
+        default="medium",
+    )
+    run_parser.add_argument("--duration", type=int, default=300)
+    run_parser.add_argument("--max-latency-ms", type=int, default=5000)
+    run_parser.add_argument("--max-error-rate", type=float, default=0.5)
+    run_parser.add_argument("--allow-target-unreachable", action="store_true")
+    run_parser.add_argument(
+        "--skip-preflight",
+        action="store_true",
+        help="Only for offline package validation; never use in a live exercise.",
+    )
+
+    stop_parser = commands.add_parser("stop", help="Abort one action or all runs")
+    stop_parser.add_argument("action", nargs="?")
+    reset_parser = commands.add_parser("reset", help="Reset one action or all runs")
+    reset_parser.add_argument("action", nargs="?")
+    args = parser.parse_args()
+
+    try:
+        if args.command == "list":
+            result = {"actions": available_actions()}
+        elif args.command == "state":
+            result = get_state()
+        elif args.command == "preflight":
+            result = target_snapshot()
+        elif args.command == "run":
+            result = run_action(args)
+        elif args.command == "stop":
+            result = abort(args.action, "operator_stop")
+        else:
+            result = reset(args.action)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

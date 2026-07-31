@@ -1,6 +1,6 @@
 # LiveFireTTX Architecture
 
-LiveFireTTX is intentionally local-first. Version 0.2 uses a FastAPI facilitator app, Jinja2 templates, SQLite persistence, and generated Docker Compose labs with a separate safe chaos control service.
+LiveFireTTX is intentionally local-first. Version 0.3 uses a FastAPI facilitator app, Jinja2 templates, SQLite persistence, and generated Docker Compose labs with a separate guarded chaos control service.
 
 ## Core flow
 
@@ -43,29 +43,41 @@ The web form captures scenario type, business system, difficulty, participants, 
 
 ### Facilitator Console
 
-The console groups injects by stage and lets the exercise leader manually trigger each inject. Chaos actions support low, medium, and high intensity, repeat execution, and full reset. Trigger counts and action results are stored in SQLite and shown in the run log.
+The console groups injects by stage and lets the exercise leader manually trigger each inject. Guarded chaos runs support low, medium, and high intensity, bounded durations, reusable stop-condition profiles, repeat execution, reset, and emergency stop. Trigger counts and action results are stored in SQLite and shown in the run log.
 
 ### Target Environment
 
 The target environment is generated per exercise. It exposes safe business and dependency endpoints that react to shared simulation conditions such as latency, application errors, authentication failures, DNS failures, backup delays, blocked builds, and seeded-record integrity issues.
 
-### Chaos Control Plane
+### Guarded Chaos Control Plane
 
-The chaos environment is generated separately from the target environment and runs on `127.0.0.1:8090`. Its API and CLI share an allowlisted state engine. Each generated exercise contains only the actions relevant to its scenario. State updates use file locking and atomic replacement, while synthetic artifacts are retained for exercise evidence.
+The chaos environment is generated separately from the target environment and runs on `127.0.0.1:8090`. Its API and CLI share an allowlisted lifecycle engine. Each generated exercise contains only the actions relevant to its scenario. State updates use file locking and atomic replacement, while synthetic artifacts and run observations are retained for exercise evidence.
 
 ```text
 Facilitator Console or Chaos API
+  -> Controller and target preflight
   -> Scenario action allowlist
-  -> Intensity profile
+  -> Intensity + duration + stop conditions
+  -> Pending run
   -> Locked state update
+  -> Active run
   -> Synthetic artifact
   -> Target reads shared state
   -> Observable simulated impact
+  -> Duration elapsed or guardrail violation
+  -> Automatic rollback
+  -> Completed / aborted / failed run
 ```
+
+The controller monitors active runs every two seconds. It records target
+observations and aborts runs when the target becomes unreachable, reports a
+different exercise ID, or exceeds configured latency or error-rate thresholds.
+The target independently ignores expired effects, preserving rollback behavior
+if the controller is temporarily unavailable.
 
 ### Runtime Safety Boundary
 
-`app/services/runtime.py` validates that locally executed scripts remain inside the generated `chaos/` directory, enforces the generated intensity allowlist, applies timeouts, and records failures.
+`app/services/runtime.py` verifies the running controller and target belong to the selected exercise, validates intensity, duration, and guardrail selections, and routes v0.3 actions through the guarded API. Legacy package execution remains path-contained and time-bounded.
 
 ## Future renderers
 

@@ -29,23 +29,43 @@
 <section class="card wide">
   <div class="row between">
     <div>
-      <p class="eyebrow">Safe Chaos Control</p>
-      <h3>Simulation State</h3>
-      <p class="muted">Actions are scoped to this generated exercise, support three intensity levels, and can be repeated or reset.</p>
+      <p class="eyebrow">Guarded Chaos Control</p>
+      <h3>Run Safety &amp; Simulation State</h3>
+      <p class="muted">Every v0.3 run performs a target preflight, monitors stop conditions, and rolls back automatically.</p>
     </div>
-    <form class="inline-form" action="/exercises/{{ exercise.id }}/chaos/reset" method="post">
-      <button class="button warning" type="submit">Reset All Chaos</button>
-    </form>
+    <div class="actions">
+      <form class="inline-form" action="/exercises/{{ exercise.id }}/chaos/reset" method="post">
+        <button class="button warning" type="submit">Reset All</button>
+      </form>
+      <form class="inline-form" action="/exercises/{{ exercise.id }}/chaos/emergency-stop" method="post">
+        <button class="button emergency" type="submit">Emergency Stop</button>
+      </form>
+    </div>
+  </div>
+  <div class="control-health">
+    {% if control_status.get('mode') == 'legacy' %}
+      <span class="pill">Legacy local controller</span>
+    {% else %}
+      <span class="pill {{ 'healthy' if control_status.get('reachable') else 'failed' }}">
+        Controller {{ 'online' if control_status.get('reachable') else 'offline' }}
+      </span>
+      <span class="pill {{ 'healthy' if control_status.get('target', {}).get('reachable') else 'failed' }}">
+        Target {{ 'verified' if control_status.get('ready') else 'not ready' }}
+      </span>
+      {% if control_status.get('reachable') and not control_status.get('matches_exercise') %}
+        <span class="pill failed">Wrong exercise controller</span>
+      {% endif %}
+    {% endif %}
   </div>
   {% if chaos_state and chaos_state.get('conditions') %}
     <div class="state-summary">
       <span class="pill">Revision {{ chaos_state.get('revision', 0) }}</span>
       {% if chaos_state.get('active_actions') %}
         {% for action, detail in chaos_state.get('active_actions', {}).items() %}
-          <span class="pill active">{{ action|replace('_', ' ') }} · {{ detail.get('intensity', 'medium') }}</span>
+          <span class="pill active">{{ action|replace('_', ' ') }} · {{ detail.get('intensity', 'medium') }} · until {{ detail.get('expires_at', 'manual stop') }}</span>
         {% endfor %}
       {% else %}
-        <span class="pill healthy">No active chaos</span>
+        <span class="pill healthy">No active runs</span>
       {% endif %}
     </div>
     <div class="condition-grid">
@@ -56,8 +76,23 @@
         </div>
       {% endfor %}
     </div>
+    {% if chaos_state.get('runs') %}
+      <h4>Recent Run Lifecycle</h4>
+      <div class="run-list">
+        {% for run in chaos_state.get('runs')|reverse %}
+          {% if loop.index <= 8 %}
+            <div class="run-row">
+              <span class="run-status {{ run.get('status', 'pending') }}">{{ run.get('status', 'pending') }}</span>
+              <strong>{{ run.get('action', 'unknown')|replace('_', ' ') }}</strong>
+              <span>{{ run.get('intensity', 'medium') }} · {{ run.get('duration_seconds', '—') }}s</span>
+              <span>{{ run.get('reason', run.get('expires_at', 'awaiting preflight')) }}</span>
+            </div>
+          {% endif %}
+        {% endfor %}
+      </div>
+    {% endif %}
   {% else %}
-    <p class="muted">State is unavailable. Regenerate this exercise to use the v0.2 chaos controller.</p>
+    <p class="muted">State is unavailable. Regenerate this exercise to use the v0.3 guarded controller.</p>
   {% endif %}
 </section>
 
@@ -75,13 +110,31 @@
           <small>Audience: {{ inj.audience }}</small>
           {% if inj.action_type == 'chaos_script' %}
             <form class="inject-controls" action="/injects/{{ inj.id }}/trigger" method="post">
-              <label for="intensity-{{ inj.id }}">Intensity</label>
-              <select id="intensity-{{ inj.id }}" name="intensity">
-                {% for level in inj.payload.get('intensities', ['medium']) %}
-                  <option value="{{ level }}" {{ 'selected' if level == inj.payload.get('default_intensity', 'medium') else '' }}>{{ level|title }}</option>
-                {% endfor %}
-              </select>
-              <button class="button primary" type="submit">{{ 'Run Again' if inj.triggered else 'Apply Chaos' }}</button>
+              <div class="control-field">
+                <label for="intensity-{{ inj.id }}">Intensity</label>
+                <select id="intensity-{{ inj.id }}" name="intensity">
+                  {% for level in inj.payload.get('intensities', ['medium']) %}
+                    <option value="{{ level }}" {{ 'selected' if level == inj.payload.get('default_intensity', 'medium') else '' }}>{{ level|title }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="control-field">
+                <label for="duration-{{ inj.id }}">Duration</label>
+                <select id="duration-{{ inj.id }}" name="duration_seconds">
+                  {% for duration in inj.payload.get('durations', [300]) %}
+                    <option value="{{ duration }}" {{ 'selected' if duration == inj.payload.get('default_duration', 300) else '' }}>{{ duration // 60 }} min</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="control-field">
+                <label for="guardrails-{{ inj.id }}">Guardrails</label>
+                <select id="guardrails-{{ inj.id }}" name="guardrail_profile">
+                  {% for profile in inj.payload.get('guardrail_profiles', {'standard': {}}) %}
+                    <option value="{{ profile }}" {{ 'selected' if profile == inj.payload.get('default_guardrail_profile', 'standard') else '' }}>{{ profile|title }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <button class="button primary" type="submit" {{ 'disabled' if control_status.get('mode') == 'guarded' and not control_status.get('ready') else '' }}>{{ 'Run Again' if inj.triggered else 'Start Guarded Run' }}</button>
             </form>
             {% if inj.triggered %}
               <div class="status">Run {{ inj.trigger_count }} time{{ '' if inj.trigger_count == 1 else 's' }} · last at {{ inj.triggered_at }}</div>

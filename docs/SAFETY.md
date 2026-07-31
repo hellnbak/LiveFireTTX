@@ -37,12 +37,16 @@ Simulate indicators and operational impact. Do not create real malicious capabil
 
 ## Chaos controller guardrails
 
-The generated v0.2 chaos controller:
+The generated v0.3 chaos controller:
 
 - Exposes only actions allowlisted for the selected scenario
 - Changes generated test state and synthetic artifacts only
 - Uses bounded low, medium, and high intensity profiles
-- Supports reset without deleting evidence artifacts
+- Requires a matching target and controller preflight
+- Limits every run to 15–3600 seconds
+- Monitors latency, error rate, target availability, and exercise identity
+- Automatically rolls back expired or guardrail-aborted effects
+- Supports reset and emergency stop without deleting evidence artifacts
 - Binds generated host ports to `127.0.0.1`
 - Rejects facilitator scripts that resolve outside the generated chaos directory
 - Does not accept shell commands, executable payloads, target addresses, or arbitrary file paths

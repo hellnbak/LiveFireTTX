@@ -1,0 +1,202 @@
+from contextlib import asynccontextmanager
+import asyncio
+import json
+import os
+import time
+import urllib.error
+import urllib.request
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
+
+from engine import (
+    abort,
+    activate_run,
+    available_actions,
+    begin_run,
+    fail_run,
+    get_state,
+    observe_run,
+    reconcile_expired,
+    reset,
+)
+
+
+EXERCISE_ID = "__EXERCISE_ID__"
+TARGET_URL = os.environ.get("LIVEFIRE_TARGET_URL", "http://livefire-target:8088")
+
+
+def target_snapshot():
+    started = time.monotonic()
+    try:
+        with urllib.request.urlopen(f"{TARGET_URL}/health", timeout=1) as response:
+            payload = json.loads(response.read())
+        return {
+            "reachable": True,
+            "matches_exercise": payload.get("exercise_id") == EXERCISE_ID,
+            "response_time_ms": round((time.monotonic() - started) * 1000, 2),
+            **payload,
+        }
+    except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+        return {
+            "reachable": False,
+            "matches_exercise": False,
+            "response_time_ms": round((time.monotonic() - started) * 1000, 2),
+            "error": str(exc),
+        }
+
+
+def guardrail_violation(active, snapshot):
+    stop_conditions = active.get("stop_conditions", {})
+    if not snapshot.get("reachable"):
+        if stop_conditions.get("abort_on_target_unreachable", True):
+            return "target_unreachable"
+        return None
+    if not snapshot.get("matches_exercise"):
+        return "target_exercise_mismatch"
+    conditions = snapshot.get("conditions", {})
+    if conditions.get("latency_ms", 0) > stop_conditions.get(
+        "max_latency_ms",
+        5000,
+    ):
+        return "latency_threshold_exceeded"
+    if conditions.get("error_rate", 0) > stop_conditions.get(
+        "max_error_rate",
+        0.5,
+    ):
+        return "error_rate_threshold_exceeded"
+    return None
+
+
+async def monitor_runs():
+    while True:
+        await asyncio.sleep(2)
+        reconcile_expired()
+        state = get_state()
+        if not state["active_actions"]:
+            continue
+        snapshot = target_snapshot()
+        for action, active in list(state["active_actions"].items()):
+            violation = guardrail_violation(active, snapshot)
+            observe_run(active["run_id"], "guardrail_check", snapshot)
+            if violation:
+                abort(action, f"guardrail:{violation}")
+
+
+@asynccontextmanager
+async def lifespan(app):
+    monitor = asyncio.create_task(monitor_runs())
+    try:
+        yield
+    finally:
+        monitor.cancel()
+        try:
+            await monitor
+        except asyncio.CancelledError:
+            pass
+
+
+app = FastAPI(
+    title="LiveFireTTX Guarded Chaos Control",
+    description=(
+        "Scenario-scoped, timed, reversible simulation controls with preflight "
+        "checks, stop conditions, and automatic rollback."
+    ),
+    version="0.3.0",
+    lifespan=lifespan,
+)
+
+
+class ActionRequest(BaseModel):
+    intensity: str = "medium"
+    duration_seconds: int = Field(default=300, ge=15, le=3600)
+    max_latency_ms: int = Field(default=5000, ge=100, le=10000)
+    max_error_rate: float = Field(default=0.5, ge=0, le=1)
+    abort_on_target_unreachable: bool = True
+
+
+@app.get("/health")
+def health():
+    state = get_state()
+    target = target_snapshot()
+    return {
+        "healthy": True,
+        "ready": target["reachable"] and target["matches_exercise"],
+        "exercise_id": EXERCISE_ID,
+        "revision": state["revision"],
+        "active_runs": len(state["active_actions"]),
+        "target": target,
+    }
+
+
+@app.get("/actions")
+def actions():
+    return {"actions": available_actions()}
+
+
+@app.get("/state")
+def state():
+    return get_state()
+
+
+@app.get("/runs")
+def runs():
+    return {"runs": get_state()["runs"]}
+
+
+@app.post("/actions/{action}")
+def apply_action(action: str, request: ActionRequest):
+    try:
+        pending = begin_run(
+            action,
+            request.intensity,
+            request.duration_seconds,
+            {
+                "max_latency_ms": request.max_latency_ms,
+                "max_error_rate": request.max_error_rate,
+                "abort_on_target_unreachable": request.abort_on_target_unreachable,
+            },
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    before = target_snapshot()
+    if not before["reachable"] or not before["matches_exercise"]:
+        fail_run(pending["id"], "target_preflight_failed", before)
+        raise HTTPException(
+            status_code=503,
+            detail="Target preflight failed for this exercise",
+        )
+
+    result = activate_run(pending["id"], before)
+    after = target_snapshot()
+    observe_run(pending["id"], "after_apply", after)
+    result["before_snapshot"] = before
+    result["after_snapshot"] = after
+    return result
+
+
+@app.post("/stop/{action}")
+def stop_one(action: str):
+    try:
+        return abort(action, "operator_stop")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/reset")
+def reset_all():
+    return reset()
+
+
+@app.post("/reset/{action}")
+def reset_one(action: str):
+    try:
+        return reset(action)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/emergency-stop")
+def emergency_stop():
+    return abort(reason="emergency_stop")
