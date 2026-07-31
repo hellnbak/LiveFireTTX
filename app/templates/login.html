@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Sign In · LiveFireTTX{% endblock %}
+{% block content %}
+<section class="card auth-card">
+  <p class="eyebrow">Shared Deployment</p>
+  <h2>Sign in to LiveFireTTX</h2>
+  <p>Use the account assigned by your exercise administrator.</p>
+  {% if error %}<div class="notice danger" role="alert">{{ error }}</div>{% endif %}
+  <form action="/login" method="post" class="guided-form">
+    <input type="hidden" name="next" value="{{ next_path }}">
+    <div class="control-field">
+      <label for="username">Username</label>
+      <input id="username" name="username" autocomplete="username" maxlength="64" required autofocus>
+    </div>
+    <div class="control-field">
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" maxlength="1024" required>
+    </div>
+    <button class="button primary" type="submit">Sign In</button>
+  </form>
+</section>
+{% endblock %}

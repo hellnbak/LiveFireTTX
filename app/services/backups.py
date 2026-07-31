@@ -154,6 +154,16 @@ def _backup_database(source: Path, destination: Path) -> None:
     with sqlite3.connect(source) as source_connection:
         with sqlite3.connect(destination) as destination_connection:
             source_connection.backup(destination_connection)
+            tables = {
+                row[0]
+                for row in destination_connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                ).fetchall()
+            }
+            if "auth_sessions" in tables:
+                destination_connection.execute("DELETE FROM auth_sessions")
+                destination_connection.commit()
+                destination_connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
 
 def _exercise_count(database: Path) -> int:

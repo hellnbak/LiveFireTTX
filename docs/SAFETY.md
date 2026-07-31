@@ -26,7 +26,7 @@ LiveFireTTX must not generate, execute, or facilitate:
 - Arbitrary commands, executable injects, remote target addresses, or
   operator-selected filesystem paths
 
-## v1.2 Safety Guardrails
+## v1.3 Safety Guardrails
 
 - Allows only actions included in the generated scenario
 - Modifies generated synthetic state and package artifacts only
@@ -48,6 +48,12 @@ LiveFireTTX must not generate, execute, or facilitate:
   a generated, path-contained, non-symlinked exercise definition
 - Keeps host Docker control disabled in the application container
 - Reveals only delivered narrative and artifact information in participant view
+- Validates portable packs into a fixed schema before persistence or generation
+- Prevents imported packs from expanding the base scenario action allowlist
+- Excludes commands, scripts, remote targets, runtime paths, and executable
+  content from the portable pack schema
+- Requires authenticated role permissions before shared users reach design,
+  facilitation, evaluation, backup, or account-administration routes
 
 Dependency faults alter local API behavior only. They do not contact payment
 processors, queues, storage providers, telemetry systems, or third-party APIs.
@@ -65,6 +71,7 @@ processors, queues, storage providers, telemetry systems, or third-party APIs.
 ## Operator Guidance
 
 Run only on isolated lab systems. Review generated packages before deployment.
-Do not expose ports beyond localhost, point generated controls at production, or
-replace safe actions with unreviewed code. Use emergency stop whenever observed
-impact exceeds the exercise plan.
+Do not expose generated target or controller ports beyond localhost, point
+generated controls at production, or replace safe actions with unreviewed code.
+Shared facilitator deployments require the documented HTTPS boundary. Use
+emergency stop whenever observed impact exceeds the exercise plan.

@@ -31,6 +31,9 @@ from app.services.paths import exercise_package_root, new_exercise_package_path
 
 def create_exercise_from_request(
     request: ExerciseCreate,
+    *,
+    scenario_pack_id: str | None = None,
+    organization_profile_id: str | None = None,
 ) -> tuple[Exercise, list[InjectOption]]:
     if request.scenario_type not in SCENARIO_LIBRARY:
         raise ValueError(f"Unknown scenario_type: {request.scenario_type}")
@@ -54,6 +57,8 @@ def create_exercise_from_request(
         status="created",
         created_at=datetime.now(timezone.utc).isoformat(),
         package_path=str(package_path),
+        scenario_pack_id=scenario_pack_id,
+        organization_profile_id=organization_profile_id,
     )
 
     injects = build_inject_options(exercise)
@@ -496,6 +501,8 @@ def render_exercise_package(
             "target_modules": scenario["target_modules"],
             "chaos_modules": scenario["chaos_modules"],
             "dependency_map": scenario["dependencies"],
+            "scenario_pack_id": exercise.scenario_pack_id,
+            "organization_profile_id": exercise.organization_profile_id,
         },
         "inject_options": [inject.__dict__ for inject in injects],
     }
@@ -733,6 +740,8 @@ def _render_report(root: Path, exercise: Exercise) -> None:
             - Scenario Type: {exercise.scenario_type}
             - Business System: {exercise.business_system}
             - Duration: {exercise.duration_minutes} minutes
+            - Scenario Pack ID: {exercise.scenario_pack_id or 'built-in guided setup'}
+            - Organization Profile ID: {exercise.organization_profile_id or 'not applied'}
 
             ## Objectives Tested
             {chr(10).join('- ' + objective for objective in exercise.objectives)}

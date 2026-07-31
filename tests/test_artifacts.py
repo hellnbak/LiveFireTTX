@@ -35,6 +35,7 @@ class SafeArtifactTests(TestCase):
                 self.assertTrue(artifact_path.is_file())
                 self.assertTrue(inject.payload["safe"])
                 self.assertTrue(inject.payload["facilitator_defined"])
+                self.assertIn("simulated vendor", inject.payload["content"])
                 content = artifact_path.read_text()
                 self.assertIn("SIMULATED EXERCISE ARTIFACT", content)
                 self.assertIn("DO NOT TREAT AS A REAL INCIDENT RECORD", content)

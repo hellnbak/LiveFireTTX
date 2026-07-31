@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Design Library · LiveFireTTX{% endblock %}
+{% block content %}
+<section class="card wide run-header">
+  <div>
+    <p class="eyebrow">Portable Exercise Design</p>
+    <h2>Scenario and Organization Library</h2>
+    <p>Version reusable exercise designs independently from generated labs, then launch them with an organization profile.</p>
+  </div>
+  <a class="button" href="/new">Guided Setup</a>
+</section>
+
+<section class="grid two library-summary">
+  <div class="card"><span class="summary-label">Scenario Packs</span><strong class="metric">{{ packs|length }}</strong><p>Latest reusable designs available locally.</p></div>
+  <div class="card"><span class="summary-label">Organization Profiles</span><strong class="metric">{{ profiles|length }}</strong><p>Reusable systems, roles, and objectives.</p></div>
+</section>
+
+<section class="card wide">
+  <div class="row between"><div><p class="eyebrow">Scenario Library</p><h3>Launch a Versioned Pack</h3></div><a class="button" href="#import-pack">Import JSON</a></div>
+  <div class="pack-grid">
+    {% for pack in packs %}
+      <article id="pack-{{ pack.id }}" class="mini pack-card">
+        <div class="row between"><strong>{{ pack.name }}</strong><span class="pill healthy">v{{ pack.version }}</span></div>
+        <p>{{ pack.description }}</p>
+        <small>{{ pack.base_scenario_type|replace('_', ' ')|title }} · {{ pack.source }} · {{ pack.definition.injects|length or 'base' }} inject design</small>
+        <form action="/library/packs/{{ pack.id }}/exercises" method="post" class="guided-form compact-form">
+          <div class="control-field"><label for="exercise-{{ pack.id }}">Exercise name</label><input id="exercise-{{ pack.id }}" name="exercise_name" value="{{ pack.name }} exercise" maxlength="120" required></div>
+          <div class="control-field"><label for="profile-{{ pack.id }}">Organization profile</label><select id="profile-{{ pack.id }}" name="organization_profile_id"><option value="">Pack defaults</option>{% for profile in profiles %}<option value="{{ profile.id }}">{{ profile.name }} · v{{ profile.version }}</option>{% endfor %}</select></div>
+          <div class="actions"><button class="button primary" type="submit">Create Exercise</button><a class="button" href="/library/packs/{{ pack.id }}/export.json">Export</a></div>
+        </form>
+      </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="grid two">
+  <div id="import-pack" class="card">
+    <p class="eyebrow">Portable Import</p>
+    <h3>Import Scenario Pack</h3>
+    <p>Only validated JSON using supported base scenarios and allowlisted chaos actions is accepted.</p>
+    <form action="/library/packs/import" method="post" class="guided-form">
+      <div class="control-field"><label for="pack-file">Choose pack file</label><input id="pack-file" type="file" accept="application/json,.json"></div>
+      <div class="control-field"><label for="pack-json">Pack JSON</label><textarea id="pack-json" name="pack_json" rows="10" maxlength="262144" required></textarea></div>
+      <button class="button primary" type="submit">Validate and Import</button>
+    </form>
+  </div>
+  <div class="card">
+    <p class="eyebrow">Reusable Context</p>
+    <h3>Create Organization Profile</h3>
+    <form action="/library/profiles" method="post" class="guided-form">
+      <div class="grid two"><div class="control-field"><label for="profile-slug">Slug</label><input id="profile-slug" name="slug" placeholder="commerce-operations" pattern="[a-z0-9][a-z0-9-]{1,63}" required></div><div class="control-field"><label for="profile-version">Version</label><input id="profile-version" name="version" value="1.0.0" required></div></div>
+      <div class="control-field"><label for="profile-name">Name</label><input id="profile-name" name="name" maxlength="120" required></div>
+      <div class="control-field"><label for="profile-description">Description</label><textarea id="profile-description" name="description" rows="2" maxlength="1000" required></textarea></div>
+      <div class="control-field"><label for="profile-system">Business system</label><input id="profile-system" name="business_system" maxlength="120" required></div>
+      <div class="control-field"><label for="profile-participants">Roles, comma separated</label><input id="profile-participants" name="participants" maxlength="3000" required></div>
+      <div class="control-field"><label for="profile-objectives">Objectives, one per line</label><textarea id="profile-objectives" name="objectives" rows="5" maxlength="5000" required></textarea></div>
+      <button class="button primary" type="submit">Save Immutable Version</button>
+    </form>
+  </div>
+</section>
+
+<section class="card wide">
+  <p class="eyebrow">Version History</p>
+  <h3>Local Library Inventory</h3>
+  <div class="library-history">
+    {% for pack in pack_versions %}<div class="mini"><strong>{{ pack.name }} v{{ pack.version }}</strong><br><span>Pack · {{ pack.source }} · {{ pack.checksum[:12] }}</span></div>{% endfor %}
+    {% for profile in profile_versions %}<div id="profile-{{ profile.id }}" class="mini"><strong>{{ profile.name }} v{{ profile.version }}</strong><br><span>Organization profile · <a href="/library/profiles/{{ profile.id }}/export.json">Export</a></span></div>{% endfor %}
+  </div>
+</section>
+<script src="/static/library.js?v={{ app_version }}" defer></script>
+{% endblock %}

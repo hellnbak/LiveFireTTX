@@ -5,7 +5,7 @@ tabletop exercises. It generates a scenario-specific target, a guarded chaos
 control plane, facilitator injects, participant materials, sample data, and an
 evidence-ready command center.
 
-> **Status:** v1.2.0. Run only in controlled lab environments.
+> **Status:** v1.3.0. Run only in controlled lab environments.
 
 ## Highlights
 
@@ -25,6 +25,10 @@ evidence-ready command center.
 - Unified MSEL run-of-show with next-action facilitator guidance
 - Participant presentation and evaluator/AAR improvement-planning workspaces
 - Optional one-click host lab launch, validation, and teardown
+- Immutable local scenario-pack versions with validated JSON import/export
+- Reusable organization profiles for systems, roles, and objectives
+- Opt-in shared deployment mode with authenticated administrator, facilitator,
+  evaluator, and participant permissions
 - Safe watermarked artifact injects
 - Objective scoring, run comparison, after-action reports, and ZIP evidence export
 - Versioned SQLite migrations plus local backup and restore tooling
@@ -125,6 +129,38 @@ Generated services:
 Set `LIVEFIRE_TARGET_HOST_PORT` or `LIVEFIRE_CONTROL_HOST_PORT` before
 deployment when the default host ports are already in use.
 
+## Portable Design Library
+
+Open **Design Library** to launch a built-in pack, create an immutable
+organization-profile version, import a validated scenario-pack JSON file, or
+export a pack for another LiveFireTTX installation. From an exercise command
+center, use **Capture this design as a reusable scenario pack** to retain the
+exercise defaults, inject design, safe action references, and checkpoints while
+excluding runtime IDs, package paths, trigger history, and evidence.
+
+Imported packs cannot add actions outside the selected built-in scenario's
+allowlist. See [`docs/SCENARIO_PACKS.md`](docs/SCENARIO_PACKS.md) and
+[`examples/scenario-pack-example.json`](examples/scenario-pack-example.json).
+
+## Shared Deployment
+
+Local mode remains the default and requires no sign-in. For an HTTPS-protected
+shared facilitator deployment, enable shared mode and provide an initial
+administrator password:
+
+```bash
+export LIVEFIRE_SHARED_MODE=true
+export LIVEFIRE_ALLOWED_HOSTS=livefire.example
+export LIVEFIRE_BOOTSTRAP_ADMIN_PASSWORD='replace-with-a-long-random-password'
+export LIVEFIRE_SECURE_COOKIES=true
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips=127.0.0.1
+```
+
+Place an HTTPS reverse proxy in front of the loopback-bound process. After the
+first administrator account is created, remove the bootstrap password from the
+runtime environment. See
+[`docs/SHARED_DEPLOYMENTS.md`](docs/SHARED_DEPLOYMENTS.md).
+
 ## Configuration
 
 | Variable | Default | Purpose |
@@ -140,6 +176,12 @@ deployment when the default host ports are already in use.
 | `LIVEFIRE_SCHEDULER_INTERVAL_SECONDS` | `2` | Scheduled-delivery polling interval |
 | `LIVEFIRE_LAB_CONTROLS_ENABLED` | `true` | Enable fixed one-click Docker controls on a direct host install |
 | `LIVEFIRE_LAB_COMMAND_TIMEOUT_SECONDS` | `180` | Maximum lifecycle operation time |
+| `LIVEFIRE_SHARED_MODE` | `false` | Require authenticated role permissions |
+| `LIVEFIRE_ALLOWED_HOSTS` | Loopback hosts | Trusted browser hostnames; non-loopback requires shared mode |
+| `LIVEFIRE_SESSION_TTL_MINUTES` | `480` | Server-side session lifetime |
+| `LIVEFIRE_SECURE_COOKIES` | Shared-mode value | Require HTTPS-only session cookies |
+| `LIVEFIRE_BOOTSTRAP_ADMIN_USERNAME` | `admin` | First shared-mode administrator username |
+| `LIVEFIRE_BOOTSTRAP_ADMIN_PASSWORD` | unset | First shared-mode administrator password; 12–1024 characters |
 
 The control URL must remain on loopback unless the container-only
 `host.docker.internal` bridge is explicitly enabled. See
@@ -157,7 +199,8 @@ livefirettx restore backups/livefirettx-<timestamp>.zip --confirm
 ```
 
 Stop the application before restoring. Archives contain the SQLite snapshot,
-generated exercise packages, and a versioned manifest.
+generated exercise packages, and a versioned manifest. Active authentication
+sessions are intentionally excluded.
 
 ## Development and Release Gates
 
@@ -190,6 +233,8 @@ Review [`docs/SAFETY.md`](docs/SAFETY.md) and
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)
+- [`docs/SCENARIO_PACKS.md`](docs/SCENARIO_PACKS.md)
+- [`docs/SHARED_DEPLOYMENTS.md`](docs/SHARED_DEPLOYMENTS.md)
 - [`docs/ROADMAP.md`](docs/ROADMAP.md)
 - [`docs/SAFETY.md`](docs/SAFETY.md)
 - [`docs/RELEASE_SECURITY_REVIEW.md`](docs/RELEASE_SECURITY_REVIEW.md)

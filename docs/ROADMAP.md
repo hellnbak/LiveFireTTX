@@ -80,7 +80,7 @@
 - Corrective-action ownership, due dates, status, and AAR/IP export
 - Optional fixed-command one-click lab lifecycle for direct host installs
 
-## Next: v1.3 Portable Exercise Design
+## v1.3 Portable Exercise Design
 
 - Scenario-pack import/export independent of generated exercise instances
 - Versioned local scenario library and reusable organization profiles

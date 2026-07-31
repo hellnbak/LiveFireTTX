@@ -39,6 +39,7 @@ from app.models import (
     get_improvement_action,
     get_inject,
     get_injects,
+    get_organization_profile,
     init_db,
     list_checkpoints,
     list_events,
@@ -53,10 +54,19 @@ from app.models import (
 )
 from app.routes.packages import router as packages_router
 from app.routes.system import router as system_router
+from app.routes.auth import router as auth_router
+from app.routes.library import router as library_router
 from app.services.artifacts import (
     ARTIFACT_KINDS,
     artifact_trigger_result,
     create_safe_artifact_inject,
+)
+from app.services.auth import (
+    AUTH_COOKIE_NAME,
+    LOCAL_ADMIN,
+    required_capability,
+    resolve_session,
+    seed_bootstrap_admin,
 )
 from app.services.generator import create_exercise_from_request
 from app.services.facilitator import (
@@ -81,6 +91,11 @@ from app.services.operations import (
     build_run_of_show,
     participant_snapshot,
     seed_default_checkpoints,
+)
+from app.services.scenario_library import (
+    latest_organization_profiles,
+    organization_profile_payload,
+    seed_builtin_scenario_packs,
 )
 from app.services.runtime import (
     ChaosExecutionError,
@@ -132,13 +147,15 @@ app = FastAPI(
 )
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=["127.0.0.1", "localhost", "[::1]", "testserver"],
+    allowed_hosts=list(settings.allowed_hosts),
 )
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 templates.env.globals["app_version"] = __version__
 app.mount("/static", StaticFiles(directory=str(BASE / "templates" / "static")), name="static")
 app.include_router(system_router)
 app.include_router(packages_router)
+app.include_router(auth_router)
+app.include_router(library_router)
 
 
 @app.exception_handler(PackagePathError)
@@ -222,20 +239,28 @@ def _redirect_to_exercise(exercise: Exercise) -> RedirectResponse:
     return RedirectResponse(target, status_code=303)
 
 
-def _same_local_origin(request: Request, origin: str) -> bool:
+def _same_allowed_origin(request: Request, origin: str) -> bool:
     try:
         candidate = urlsplit(origin)
         request_origin = urlsplit(
             f"{request.url.scheme}://{request.headers.get('host', '')}"
         )
-        candidate_port = candidate.port or 80
-        request_port = request_origin.port or 80
+        candidate_port = candidate.port or (
+            443 if candidate.scheme == "https" else 80
+        )
+        request_port = request_origin.port or (
+            443 if request_origin.scheme == "https" else 80
+        )
     except ValueError:
         return False
     return bool(
-        candidate.scheme == request.url.scheme == "http"
-        and candidate.hostname in LOOPBACK_HOSTS
-        and request_origin.hostname in LOOPBACK_HOSTS
+        candidate.scheme == request.url.scheme
+        and candidate.scheme in {"http", "https"}
+        and candidate.hostname == request_origin.hostname
+        and (
+            settings.shared_mode
+            or candidate.hostname in LOOPBACK_HOSTS
+        )
         and candidate_port == request_port
         and candidate.username is None
         and candidate.password is None
@@ -259,11 +284,43 @@ async def request_context(request: Request, call_next):
     origin = request.headers.get("origin")
     fetch_site = request.headers.get("sec-fetch-site", "").lower()
     opaque_same_origin = origin == "null" and fetch_site == "same-origin"
-    if request.method in MUTATING_METHODS and (
+    request.state.current_user = LOCAL_ADMIN if not settings.shared_mode else None
+    if settings.shared_mode:
+        request.state.current_user = resolve_session(
+            request.cookies.get(AUTH_COOKIE_NAME)
+        )
+    required = required_capability(request.method, request.url.path)
+    user = request.state.current_user
+    response: Response
+    if settings.shared_mode and required and not user:
+        if request.method == "GET" and "text/html" in request.headers.get(
+            "accept",
+            "",
+        ):
+            next_path = quote(
+                request.url.path
+                + (f"?{request.url.query}" if request.url.query else ""),
+                safe="/?=&",
+            )
+            response = RedirectResponse(
+                f"/login?next={next_path}",
+                status_code=303,
+            )
+        else:
+            response = JSONResponse(
+                {"detail": "Authentication required"},
+                status_code=401,
+            )
+    elif settings.shared_mode and required and not user.can(required):
+        response = JSONResponse(
+            {"detail": "This account does not have permission for that action"},
+            status_code=403,
+        )
+    elif request.method in MUTATING_METHODS and (
         (
             origin is not None
             and not opaque_same_origin
-            and not _same_local_origin(request, origin)
+            and not _same_allowed_origin(request, origin)
         )
         or (origin is None and fetch_site == "cross-site")
     ):
@@ -305,6 +362,12 @@ async def request_context(request: Request, call_next):
         "script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
         "connect-src 'self'"
     )
+    if settings.shared_mode:
+        response.headers["Cache-Control"] = "no-store"
+    if settings.shared_mode and settings.secure_cookies:
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
     LOGGER.info(
         json.dumps(
             {
@@ -341,6 +404,12 @@ def _exercise_evidence(exercise):
 @app.on_event("startup")
 async def startup() -> None:
     init_db()
+    seed_builtin_scenario_packs()
+    seed_bootstrap_admin(
+        shared_mode=settings.shared_mode,
+        username=settings.bootstrap_admin_username,
+        password=settings.bootstrap_admin_password,
+    )
     app.state.facilitator_scheduler = None
     if settings.scheduler_enabled:
         app.state.facilitator_scheduler = asyncio.create_task(
@@ -372,10 +441,18 @@ def home(request: Request):
 
 @app.get("/new", response_class=HTMLResponse)
 def new_exercise(request: Request):
+    profiles = latest_organization_profiles()
     return templates.TemplateResponse(
         request,
         "new.html",
-        {"scenarios": SCENARIO_LIBRARY},
+        {
+            "scenarios": SCENARIO_LIBRARY,
+            "organization_profiles": profiles,
+            "organization_profile_catalog": [
+                {"id": profile.id, **organization_profile_payload(profile)}
+                for profile in profiles
+            ],
+        },
     )
 
 
@@ -397,6 +474,7 @@ async def create_exercise(request: Request):
         ),
     )
     objectives = _field(fields, "objectives", "")
+    organization_profile_id = fields.get("organization_profile_id") or None
     name = name.strip()
     business_system = business_system.strip()
     if not name or len(name) > 120:
@@ -418,6 +496,10 @@ async def create_exercise(request: Request):
         raise HTTPException(400, "Participant list is too large")
     if len(objective_list) > 20 or any(len(item) > 240 for item in objective_list):
         raise HTTPException(400, "Objective list is too large")
+    if organization_profile_id and not get_organization_profile(
+        organization_profile_id
+    ):
+        raise HTTPException(400, "Organization profile was not found")
 
     req = ExerciseCreate(
         name=name,
@@ -429,7 +511,10 @@ async def create_exercise(request: Request):
         participants=participant_list,
         objectives=objective_list,
     )
-    ex, injects = create_exercise_from_request(req)
+    ex, injects = create_exercise_from_request(
+        req,
+        organization_profile_id=organization_profile_id,
+    )
     save_exercise(ex)
     save_injects(injects)
     seed_default_checkpoints(ex)

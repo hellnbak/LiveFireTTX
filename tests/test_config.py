@@ -27,6 +27,15 @@ class ConfigurationTests(TestCase):
         self.assertEqual(2, settings.scheduler_interval_seconds)
         self.assertTrue(settings.lab_controls_enabled)
         self.assertEqual(180, settings.lab_command_timeout_seconds)
+        self.assertFalse(settings.shared_mode)
+        self.assertEqual(
+            ("127.0.0.1", "localhost", "[::1]", "testserver"),
+            settings.allowed_hosts,
+        )
+        self.assertEqual(480, settings.session_ttl_minutes)
+        self.assertFalse(settings.secure_cookies)
+        self.assertEqual("admin", settings.bootstrap_admin_username)
+        self.assertIsNone(settings.bootstrap_admin_password)
 
     def test_data_root_sets_all_default_storage_paths(self) -> None:
         with patch.dict(
@@ -44,6 +53,16 @@ class ConfigurationTests(TestCase):
         )
         self.assertEqual(expected_root / "backups", settings.backup_root)
 
+    def test_shared_mode_defaults_to_secure_session_cookies(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"LIVEFIRE_SHARED_MODE": "true"},
+            clear=True,
+        ):
+            settings = load_settings()
+        self.assertTrue(settings.shared_mode)
+        self.assertTrue(settings.secure_cookies)
+
     def test_accepts_local_control_url_and_custom_paths(self) -> None:
         with patch.dict(
             "os.environ",
@@ -56,6 +75,12 @@ class ConfigurationTests(TestCase):
                 "LIVEFIRE_SCHEDULER_INTERVAL_SECONDS": "5",
                 "LIVEFIRE_LAB_CONTROLS_ENABLED": "false",
                 "LIVEFIRE_LAB_COMMAND_TIMEOUT_SECONDS": "90",
+                "LIVEFIRE_SHARED_MODE": "true",
+                "LIVEFIRE_ALLOWED_HOSTS": "livefire.example,*.lab.example",
+                "LIVEFIRE_SESSION_TTL_MINUTES": "120",
+                "LIVEFIRE_SECURE_COOKIES": "true",
+                "LIVEFIRE_BOOTSTRAP_ADMIN_USERNAME": "exercise.admin",
+                "LIVEFIRE_BOOTSTRAP_ADMIN_PASSWORD": "bootstrap-password-123",
             },
             clear=True,
         ):
@@ -70,6 +95,18 @@ class ConfigurationTests(TestCase):
         self.assertEqual(5, settings.scheduler_interval_seconds)
         self.assertFalse(settings.lab_controls_enabled)
         self.assertEqual(90, settings.lab_command_timeout_seconds)
+        self.assertTrue(settings.shared_mode)
+        self.assertEqual(
+            ("livefire.example", "*.lab.example"),
+            settings.allowed_hosts,
+        )
+        self.assertEqual(120, settings.session_ttl_minutes)
+        self.assertTrue(settings.secure_cookies)
+        self.assertEqual("exercise.admin", settings.bootstrap_admin_username)
+        self.assertEqual(
+            "bootstrap-password-123",
+            settings.bootstrap_admin_password,
+        )
 
     def test_rejects_invalid_scheduler_configuration(self) -> None:
         for environment in [
@@ -78,6 +115,13 @@ class ConfigurationTests(TestCase):
             {"LIVEFIRE_SCHEDULER_INTERVAL_SECONDS": "fast"},
             {"LIVEFIRE_LAB_CONTROLS_ENABLED": "sometimes"},
             {"LIVEFIRE_LAB_COMMAND_TIMEOUT_SECONDS": "0"},
+            {"LIVEFIRE_SHARED_MODE": "sometimes"},
+            {"LIVEFIRE_ALLOWED_HOSTS": "https://livefire.example"},
+            {"LIVEFIRE_ALLOWED_HOSTS": "livefire.example"},
+            {"LIVEFIRE_SESSION_TTL_MINUTES": "0"},
+            {"LIVEFIRE_SECURE_COOKIES": "sometimes"},
+            {"LIVEFIRE_BOOTSTRAP_ADMIN_USERNAME": "Admin User"},
+            {"LIVEFIRE_BOOTSTRAP_ADMIN_PASSWORD": "short"},
         ]:
             with self.subTest(environment=environment):
                 with patch.dict("os.environ", environment, clear=True):

@@ -1,9 +1,10 @@
-# v1.2 Release Checklist
+# v1.3 Release Checklist
 
 ## Code and Data
 
 - [ ] `app/version.py`, `pyproject.toml`, and changelog versions match.
 - [ ] Database migration and restore tests pass.
+- [ ] Schema version 5 creates pack, profile, account, session, and provenance records.
 - [ ] No generated packages, databases, backups, or secrets are tracked.
 - [ ] `git diff --check` passes.
 
@@ -34,13 +35,21 @@
 - [ ] Container mode leaves one-click Docker controls disabled.
 - [ ] Evidence and after-action exports open successfully.
 - [ ] Cleanup removes generated Docker resources.
+- [ ] Built-in scenario packs seed idempotently and retain immutable checksums.
+- [ ] Exercise capture/export/import/recreate round trip excludes runtime IDs and paths.
+- [ ] Imported packs cannot reference actions outside their base scenario allowlist.
+- [ ] Organization profiles apply business system, roles, and objectives.
+- [ ] Anonymous shared-mode access requires sign-in.
+- [ ] Administrator, facilitator, evaluator, and participant route boundaries pass.
+- [ ] Logout, password reset, account disablement, and expiration revoke sessions.
+- [ ] Backup snapshots contain users but no active authentication sessions.
 
 ## Documentation and Security
 
 - [ ] README quick start succeeds on a clean host.
 - [ ] Configuration and upgrade guides match actual behavior.
 - [ ] Safety and threat-model reviews are current.
-- [ ] Release security review covers the v1.2 operations and Docker-control delta.
+- [ ] Release security review covers the v1.3 portability and authentication delta.
 - [ ] Dependency and secret scanning show no unaccepted release blocker.
 - [ ] Documented security exceptions still match upstream package constraints.
 - [ ] No open critical or high-severity defects remain.
@@ -48,6 +57,6 @@
 ## Publication
 
 - [ ] Merge the release branch.
-- [ ] Create signed tag `v1.2.0`.
+- [ ] Create signed tag `v1.3.0`.
 - [ ] Confirm the release workflow publishes source and wheel artifacts.
 - [ ] Publish release notes and known limitations.

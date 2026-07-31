@@ -1,6 +1,6 @@
 # LiveFireTTX Architecture
 
-LiveFireTTX v1.2 is intentionally local-first. The facilitator application uses
+LiveFireTTX v1.3 is intentionally local-first. The facilitator application uses
 FastAPI, Jinja2, SQLite, and filesystem-backed generated packages. Every
 exercise receives a separate Docker Compose target and chaos controller bound
 to localhost.
@@ -19,6 +19,10 @@ Guided scenario preset
   -> evidence archive and after-action report / improvement plan
 ```
 
+Portable scenario packs and organization profiles feed the same validated
+exercise-generation path without retaining source exercise IDs, generated
+paths, runtime state, or evidence.
+
 ## Application Components
 
 ### Configuration
@@ -31,6 +35,9 @@ timeout settings. The v1 controller URL is restricted to localhost.
 `app/models.py` owns SQLite access. Ordered migrations are recorded in
 `schema_migrations`. Connections enable foreign keys, a busy timeout, and WAL.
 Health checks run SQLite quick-check and expose the active schema version.
+
+Schema version 5 adds immutable scenario-pack and organization-profile
+versions, exercise provenance, user accounts, and hashed server-side sessions.
 
 `app/services/backups.py` uses SQLite's backup API to create a consistent
 snapshot, packages generated exercises with a versioned manifest, validates ZIP
@@ -52,6 +59,19 @@ roles, target modules, safe chaos modules, and default objectives.
 - Safe artifacts and reports
 - Cleanup scripts
 
+### Portable Design Library
+
+`app/services/scenario_library.py` validates the versioned scenario-pack schema,
+seeds built-in designs, captures portable definitions from exercises, computes
+canonical SHA-256 checksums, and recreates exercises through the existing
+generator. Imports are size and count bounded. They may reference only built-in
+scenario types, supported inject types, package-contained built-in artifacts,
+and chaos actions already allowed by the selected base scenario.
+
+Organization profiles are immutable versions containing business-system,
+participant-role, and objective defaults. Generated exercises record both pack
+and profile provenance in SQLite and `exercise.yml`.
+
 ### HTTP and UI
 
 `app/main.py` hosts the facilitator workflow and inject/playbook routes.
@@ -63,6 +83,19 @@ mode, a participant-safe presentation display, an evaluator workspace,
 dependency topology, exercise intelligence, artifact design, live telemetry,
 run control, and the visual playbook editor. Browser checks improve feedback,
 while the generated controller remains authoritative for playbook validation.
+
+### Shared Deployment Authentication
+
+Local mode retains the original zero-login workflow. Opt-in shared mode creates
+an initial administrator, stores PBKDF2-SHA256 password hashes, issues random
+opaque sessions whose tokens are stored only as SHA-256 hashes, and enforces
+administrator, facilitator, evaluator, and participant capabilities before
+route dispatch. Session cookies are HttpOnly and SameSite Strict; shared mode
+defaults them to Secure. Non-loopback trusted hosts are rejected unless shared
+mode is enabled.
+
+Accounts are retained in backups, but active sessions are removed from backup
+snapshots so restore cannot resurrect browser access.
 
 ### Exercise Intelligence
 

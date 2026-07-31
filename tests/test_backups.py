@@ -7,6 +7,7 @@ from unittest import TestCase
 from unittest.mock import patch
 from zipfile import ZIP_DEFLATED, ZipFile
 import json
+import sqlite3
 
 from app import models
 from app.services.backups import (
@@ -14,9 +15,35 @@ from app.services.backups import (
     read_backup_manifest,
     restore_backup,
 )
+from app.services.auth import create_session, create_user
 
 
 class BackupTests(TestCase):
+    def test_backup_excludes_active_authentication_sessions(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            database = root / "livefirettx.db"
+            with patch.object(models, "DB_PATH", database):
+                models.init_db()
+                user = create_user(
+                    username="backup.admin",
+                    display_name="Backup Admin",
+                    role="admin",
+                    password="backup-password-123",
+                )
+                create_session(user, 60)
+                archive = BytesIO(
+                    build_backup_archive(database, root / "missing")
+                )
+            with ZipFile(archive) as backup:
+                snapshot = root / "snapshot.db"
+                snapshot.write_bytes(backup.read("database/livefirettx.db"))
+            with sqlite3.connect(snapshot) as connection:
+                count = connection.execute(
+                    "SELECT COUNT(*) FROM auth_sessions"
+                ).fetchone()[0]
+            self.assertEqual(0, count)
+
     def test_backup_and_restore_preserve_database_and_packages(self) -> None:
         with TemporaryDirectory() as temporary:
             root = Path(temporary)

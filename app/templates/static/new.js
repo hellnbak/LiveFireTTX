@@ -10,6 +10,9 @@
   const objectives = document.getElementById("objectives");
   const dependencyPreview = document.getElementById("dependency-preview");
   const roleSummary = document.getElementById("role-summary");
+  const profileElement = document.getElementById("organization-profiles");
+  const profileSelect = document.getElementById("organization-profile");
+  const profiles = profileElement ? JSON.parse(profileElement.textContent) : [];
 
   const selectedScenario = () => scenarios[scenarioInput.value];
 
@@ -58,6 +61,16 @@
   document
     .getElementById("reset-objectives")
     .addEventListener("click", applyObjectives);
+  if (profileSelect) {
+    profileSelect.addEventListener("change", () => {
+      const profile = profiles.find((item) => item.id === profileSelect.value);
+      if (!profile) return;
+      businessSystem.value = profile.business_system;
+      participants.value = profile.participants.join(", ");
+      objectives.value = profile.objectives.join("\n");
+      roleSummary.textContent = `${profile.participants.length} profile role briefs will be generated.`;
+    });
+  }
 
   applyScenario(scenarioInput.value);
 })();

@@ -121,4 +121,27 @@ class ModelMigrationTests(TestCase):
                 self.assertEqual("completed", stored_action.status)
                 self.assertIsNotNone(stored_action.completed_at)
                 self.assertEqual(models.SCHEMA_VERSION, models.database_schema_version())
+                with models.connect() as connection:
+                    tables = {
+                        row["name"]
+                        for row in connection.execute(
+                            "SELECT name FROM sqlite_master WHERE type = 'table'"
+                        ).fetchall()
+                    }
+                    exercise_columns = {
+                        row["name"]
+                        for row in connection.execute(
+                            "PRAGMA table_info(exercises)"
+                        ).fetchall()
+                    }
+                self.assertTrue(
+                    {
+                        "scenario_packs",
+                        "organization_profiles",
+                        "users",
+                        "auth_sessions",
+                    }.issubset(tables)
+                )
+                self.assertIn("scenario_pack_id", exercise_columns)
+                self.assertIn("organization_profile_id", exercise_columns)
                 self.assertTrue(models.database_health()["healthy"])

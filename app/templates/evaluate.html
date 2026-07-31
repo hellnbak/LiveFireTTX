@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Evaluate {{ exercise.name }} · LiveFireTTX{% endblock %}
 {% block content %}
-<section class="card wide run-header"><div><p class="eyebrow">Evaluator Workspace</p><h2>{{ exercise.name }}</h2><p>Capture evidence while the exercise runs, then assign and track corrective actions.</p></div><div class="actions"><a class="button" href="/exercises/{{ exercise.id }}/run">Run Mode</a><a class="button" href="/exercises/{{ exercise.id }}">Command Center</a><a class="button primary" href="/exercises/{{ exercise.id }}/reports/after-action.md">Download AAR/IP</a></div></section>
+<section class="card wide run-header"><div><p class="eyebrow">Evaluator Workspace</p><h2>{{ exercise.name }}</h2><p>Capture evidence while the exercise runs, then assign and track corrective actions.</p></div><div class="actions">{% if request.state.current_user.can('facilitate') %}<a class="button" href="/exercises/{{ exercise.id }}/run">Run Mode</a><a class="button" href="/exercises/{{ exercise.id }}">Command Center</a>{% endif %}<a class="button primary" href="/exercises/{{ exercise.id }}/reports/after-action.md">Download AAR/IP</a></div></section>
 
 <section class="grid two evaluator-summary">
   <div class="card"><p class="eyebrow">Assessment</p><h3>{{ intelligence.readiness_score }}/100 · {{ intelligence.score_label }}</h3><div class="operations-summary vertical"><span><strong>{{ intelligence.assessed_objectives }}</strong>/{{ intelligence.objective_count }} objectives assessed</span><span><strong>{{ run_of_show.completed_count }}</strong>/{{ run_of_show.entry_count }} MSEL items complete</span><span><strong>{{ intelligence.open_improvement_actions }}</strong> open corrective actions</span></div></div>

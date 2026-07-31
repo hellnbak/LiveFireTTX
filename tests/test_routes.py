@@ -60,7 +60,7 @@ class ApplicationRouteTests(TestCase):
                 with TestClient(app) as client:
                     health = client.get("/healthz")
                     self.assertEqual(200, health.status_code)
-                    self.assertEqual("1.2.0", health.json()["version"])
+                    self.assertEqual("1.3.0", health.json()["version"])
                     self.assertTrue(health.json()["healthy"])
                     self.assertTrue(health.headers["x-request-id"])
                     self.assertEqual(
@@ -359,3 +359,79 @@ class ApplicationRouteTests(TestCase):
                         f"/exercises/{exercise.id}/reports/evidence.zip"
                     )
                     self.assertEqual(200, evidence.status_code)
+
+    def test_v13_design_library_profile_and_pack_workflow(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with (
+                patch.object(models, "DB_PATH", root / "livefirettx.db"),
+                patch.object(models, "GENERATED_ROOT", root / "exercises"),
+                patch(
+                    "app.services.generator.GENERATED_ROOT",
+                    root / "exercises",
+                ),
+            ):
+                with TestClient(app) as client:
+                    library = client.get("/library")
+                    self.assertEqual(200, library.status_code)
+                    self.assertIn("Portable Exercise Design", library.text)
+                    self.assertIn("Import Scenario Pack", library.text)
+
+                    profile_response = client.post(
+                        "/library/profiles",
+                        data={
+                            "slug": "commerce-response",
+                            "name": "Commerce Response",
+                            "version": "1.0.0",
+                            "description": "Commerce exercise context.",
+                            "business_system": "Checkout Platform",
+                            "participants": "Incident Commander, SRE",
+                            "objectives": "Assess impact\nRecover safely",
+                        },
+                        follow_redirects=False,
+                    )
+                    self.assertEqual(303, profile_response.status_code)
+                    profile = models.list_organization_profiles()[0]
+                    pack = next(
+                        item
+                        for item in models.list_scenario_packs()
+                        if item.base_scenario_type == "cloud_outage"
+                    )
+                    created = client.post(
+                        f"/library/packs/{pack.id}/exercises",
+                        data={
+                            "exercise_name": "Library exercise",
+                            "organization_profile_id": profile.id,
+                        },
+                        follow_redirects=False,
+                    )
+                    self.assertEqual(303, created.status_code)
+                    exercise = models.list_exercises()[0]
+                    self.assertEqual(pack.id, exercise.scenario_pack_id)
+                    self.assertEqual(profile.id, exercise.organization_profile_id)
+                    self.assertEqual("Checkout Platform", exercise.business_system)
+
+                    captured = client.post(
+                        f"/exercises/{exercise.id}/scenario-pack",
+                        data={
+                            "slug": "library-exercise",
+                            "name": "Library Exercise",
+                            "version": "1.1.0",
+                            "description": "Captured portable exercise design.",
+                        },
+                        follow_redirects=False,
+                    )
+                    self.assertEqual(303, captured.status_code)
+                    captured_pack = models.find_scenario_pack(
+                        "library-exercise",
+                        "1.1.0",
+                    )
+                    exported = client.get(
+                        f"/library/packs/{captured_pack.id}/export.json"
+                    )
+                    self.assertEqual(200, exported.status_code)
+                    self.assertIn(
+                        "application/vnd.livefirettx.scenario-pack+json",
+                        exported.headers["content-type"],
+                    )
+                    self.assertNotIn(exercise.id, exported.text)

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}User Administration · LiveFireTTX{% endblock %}
+{% block content %}
+<section class="card wide run-header">
+  <div>
+    <p class="eyebrow">Shared Deployment</p>
+    <h2>User Administration</h2>
+    <p>Create role-scoped accounts and revoke access without exposing session tokens.</p>
+  </div>
+  <a class="button" href="/">Dashboard</a>
+</section>
+
+<section class="grid two">
+  <div class="card">
+    <h3>Create Account</h3>
+    <form action="/admin/users" method="post" class="guided-form">
+      <div class="control-field"><label for="new-username">Username</label><input id="new-username" name="username" maxlength="64" required></div>
+      <div class="control-field"><label for="display-name">Display name</label><input id="display-name" name="display_name" maxlength="120" required></div>
+      <div class="control-field"><label for="new-role">Role</label><select id="new-role" name="role">{% for role in roles %}<option value="{{ role }}">{{ role|title }}</option>{% endfor %}</select></div>
+      <div class="control-field"><label for="new-password">Temporary password</label><input id="new-password" name="password" type="password" minlength="12" maxlength="1024" required></div>
+      <button class="button primary" type="submit">Create Account</button>
+    </form>
+  </div>
+  <div class="card">
+    <h3>Role Boundaries</h3>
+    <div class="mini"><strong>Administrator</strong><br><span>Users, backups, design, facilitation, and evaluation.</span></div>
+    <div class="mini"><strong>Facilitator</strong><br><span>Scenario design, exercise controls, chaos operations, and evaluation.</span></div>
+    <div class="mini"><strong>Evaluator</strong><br><span>Evidence, assessments, reports, and corrective actions.</span></div>
+    <div class="mini"><strong>Participant</strong><br><span>Participant display and assigned role briefs only.</span></div>
+  </div>
+</section>
+
+<section class="card wide">
+  <h3>Accounts</h3>
+  <div class="account-list">
+    {% for user in users %}
+      <article class="mini account-row">
+        <div><strong>{{ user.display_name }}</strong><br><span>@{{ user.username }} · {{ user.role }} · {{ 'active' if user.active else 'disabled' }}</span></div>
+        <div class="account-actions">
+          <form action="/admin/users/{{ user.id }}/password" method="post" class="inline-form"><input name="password" type="password" minlength="12" maxlength="1024" placeholder="New password" required><button class="button" type="submit">Reset</button></form>
+          <form action="/admin/users/{{ user.id }}/status/{{ 'disabled' if user.active else 'active' }}" method="post"><button class="button {{ 'danger' if user.active else '' }}" type="submit">{{ 'Disable' if user.active else 'Enable' }}</button></form>
+        </div>
+      </article>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

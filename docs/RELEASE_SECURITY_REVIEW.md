@@ -1,5 +1,46 @@
 # Release Security Review
 
+## v1.3 Portable Design and Shared Access Delta
+
+Date: 2026-07-31
+
+The v1.3 design-library, organization-profile, and authenticated shared-mode
+features were reviewed with the following controls:
+
+- Schema migration 5 is additive and preserves existing exercises, generated
+  packages, evidence, checkpoints, and improvement actions.
+- Scenario-pack imports are JSON-only, limited to 256 KB, count bounded, and
+  normalized into a fixed schema before persistence or generation.
+- Imported packs cannot choose commands, scripts, binaries, addresses,
+  controller origins, generated paths, or output paths. Chaos references must
+  already exist in the selected built-in scenario allowlist.
+- Pack export excludes exercise IDs, package paths, lifecycle status, trigger
+  history, events, assessments, corrective actions, and evidence. Immutable
+  slug/version pairs use canonical SHA-256 content checksums.
+- Organization profiles are immutable bounded versions and cannot alter the
+  selected scenario action boundary.
+- Non-loopback trusted hosts require shared mode. Shared mode uses explicit host
+  validation and exact same-origin mutation checks for HTTP or HTTPS.
+- Passwords use PBKDF2-SHA256 with random salts. Random opaque session tokens
+  are stored only as SHA-256 hashes, expire server-side, and are revoked on
+  logout, password reset, or account disablement.
+- Session cookies are HttpOnly and SameSite Strict and default to Secure in
+  shared mode. Secure-cookie deployments emit HSTS.
+- Role capabilities are enforced before route dispatch. Participant and
+  evaluator accounts cannot reach design, facilitator, chaos, Docker, backup,
+  or account-administration controls.
+- The last active administrator cannot be disabled. Authentication failures use
+  generic public messages.
+- Backup snapshots retain account hashes but delete active sessions so restore
+  cannot resurrect browser access.
+- Portability, action allowlisting, immutable versions, provenance, password
+  verification, session revocation, role routing, and session-free backups are
+  covered by automated tests.
+
+Shared mode is for controlled HTTPS-protected exercise networks. It does not
+claim internet-facing tenancy, external identity integration, or authorization
+for production fault injection.
+
 ## v1.2 Exercise Operations Delta
 
 Date: 2026-07-31
@@ -27,8 +68,9 @@ controls were reviewed with the following controls:
 - Migration, MSEL ordering, participant isolation, subprocess arguments, route
   behavior, and evidence export are covered by automated tests.
 
-The local-only browser and controller boundary remains unchanged. Role views
-are workflow projections, not authenticated multi-user authorization.
+The local-only browser and controller boundary remained unchanged in v1.2. Role
+views in that release were workflow projections rather than authenticated
+multi-user authorization; v1.3 adds the opt-in authorization layer.
 
 ## v1.1 Facilitator Operations Delta
 

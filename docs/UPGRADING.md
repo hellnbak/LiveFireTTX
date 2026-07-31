@@ -1,5 +1,25 @@
 # Upgrading
 
+## From v1.2 to v1.3
+
+1. Stop the facilitator application and create a backup.
+2. Install v1.3 with Python 3.11 or newer.
+3. Start the application once. Schema migration 5 adds immutable scenario-pack
+   and organization-profile libraries, exercise provenance, users, and sessions.
+   Existing exercises and generated packages are unchanged.
+4. Built-in scenario packs are seeded as version `1.0.0`. Existing exercises do
+   not receive pack provenance automatically; capture them from the command
+   center if they should become reusable designs.
+5. Local mode remains the default and requires no accounts or login.
+6. Before enabling shared mode, configure an HTTPS reverse proxy, an explicit
+   allowed host, and an initial administrator password. Follow
+   [`SHARED_DEPLOYMENTS.md`](SHARED_DEPLOYMENTS.md).
+7. After the first administrator account exists, remove
+   `LIVEFIRE_BOOTSTRAP_ADMIN_PASSWORD` from the runtime environment and create
+   role-scoped accounts from **Users**.
+8. Create a new v1.3 backup. Account records are retained, but active sessions
+   are intentionally removed from every backup snapshot.
+
 ## From v1.1 to v1.2
 
 1. Stop the facilitator application and create a backup.

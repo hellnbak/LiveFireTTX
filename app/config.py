@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 import os
+import re
 
 
 def _path_from_env(name: str, default: Path) -> Path:
@@ -36,6 +37,23 @@ def _boolean(name: str, default: bool = False) -> bool:
     raise ValueError(f"{name} must be true or false")
 
 
+def _allowed_hosts() -> tuple[str, ...]:
+    raw = os.environ.get(
+        "LIVEFIRE_ALLOWED_HOSTS",
+        "127.0.0.1,localhost,[::1],testserver",
+    )
+    hosts = tuple(dict.fromkeys(item.strip().lower() for item in raw.split(",")))
+    if not hosts or any(not item for item in hosts):
+        raise ValueError("LIVEFIRE_ALLOWED_HOSTS must contain at least one host")
+    pattern = re.compile(
+        r"(?:\[::1\]|localhost|testserver|127\.0\.0\.1|"
+        r"(?:\*\.)?[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?)"
+    )
+    if any(not pattern.fullmatch(item) for item in hosts):
+        raise ValueError("LIVEFIRE_ALLOWED_HOSTS contains an invalid host")
+    return hosts
+
+
 @dataclass(frozen=True)
 class Settings:
     data_root: Path
@@ -49,6 +67,12 @@ class Settings:
     scheduler_interval_seconds: int
     lab_controls_enabled: bool
     lab_command_timeout_seconds: int
+    shared_mode: bool
+    allowed_hosts: tuple[str, ...]
+    session_ttl_minutes: int
+    secure_cookies: bool
+    bootstrap_admin_username: str
+    bootstrap_admin_password: str | None
 
 
 def load_settings() -> Settings:
@@ -94,6 +118,26 @@ def load_settings() -> Settings:
             "LIVEFIRE_CONTROL_URL must be an approved local HTTP origin"
         )
     control_url = raw_control_url.rstrip("/")
+    shared_mode = _boolean("LIVEFIRE_SHARED_MODE", False)
+    allowed_hosts = _allowed_hosts()
+    local_hosts = {"127.0.0.1", "localhost", "[::1]", "testserver"}
+    if not shared_mode and any(host not in local_hosts for host in allowed_hosts):
+        raise ValueError("Non-loopback allowed hosts require LIVEFIRE_SHARED_MODE=true")
+    bootstrap_admin_username = os.environ.get(
+        "LIVEFIRE_BOOTSTRAP_ADMIN_USERNAME",
+        "admin",
+    ).strip().lower()
+    if not re.fullmatch(r"[a-z][a-z0-9._-]{2,63}", bootstrap_admin_username):
+        raise ValueError("LIVEFIRE_BOOTSTRAP_ADMIN_USERNAME is invalid")
+    bootstrap_admin_password = (
+        os.environ.get("LIVEFIRE_BOOTSTRAP_ADMIN_PASSWORD") or None
+    )
+    if bootstrap_admin_password is not None and not 12 <= len(
+        bootstrap_admin_password
+    ) <= 1024:
+        raise ValueError(
+            "LIVEFIRE_BOOTSTRAP_ADMIN_PASSWORD must be 12 to 1024 characters"
+        )
     return Settings(
         data_root=data_root,
         database_path=database_path,
@@ -115,6 +159,15 @@ def load_settings() -> Settings:
             "LIVEFIRE_LAB_COMMAND_TIMEOUT_SECONDS",
             180,
         ),
+        shared_mode=shared_mode,
+        allowed_hosts=allowed_hosts,
+        session_ttl_minutes=_positive_int(
+            "LIVEFIRE_SESSION_TTL_MINUTES",
+            480,
+        ),
+        secure_cookies=_boolean("LIVEFIRE_SECURE_COOKIES", shared_mode),
+        bootstrap_admin_username=bootstrap_admin_username,
+        bootstrap_admin_password=bootstrap_admin_password,
     )
 
 

@@ -1,0 +1,58 @@
+{
+  "base_scenario_type": "cloud_outage",
+  "checkpoints": [
+    {
+      "audience": "Incident Commander",
+      "description": "Confirm incident command, impact scope, and first decision owner.",
+      "expected_action": "State command, current impact, assumptions, and next decision.",
+      "objective_index": 0,
+      "scheduled_offset_seconds": 600,
+      "title": "Command and Scope Check"
+    }
+  ],
+  "defaults": {
+    "business_system": "Customer API",
+    "difficulty": "intermediate",
+    "duration_minutes": 90,
+    "objectives": [
+      "Assess business impact",
+      "Validate monitoring",
+      "Communicate outage status"
+    ],
+    "participants": [
+      "Incident Commander",
+      "Cloud Operations",
+      "SRE / Observability",
+      "Communications"
+    ]
+  },
+  "description": "Portable cloud outage design with a bounded payment failure and command checkpoint.",
+  "injects": [
+    {
+      "action_type": "narrative",
+      "audience": "All Participants",
+      "auto_deliver": true,
+      "description": "The customer API is returning intermittent errors and elevated latency.",
+      "payload": {
+        "severity": "medium"
+      },
+      "scheduled_offset_seconds": 0,
+      "stage": "01-opening",
+      "title": "Initial Situation Brief"
+    },
+    {
+      "action": "payment_failure",
+      "action_type": "chaos_script",
+      "audience": "Application Engineering",
+      "auto_deliver": false,
+      "description": "Fails simulated payment authorization at a controlled rate.",
+      "scheduled_offset_seconds": 1200,
+      "stage": "02-dependency-pressure",
+      "title": "Degrade Payment Processor"
+    }
+  ],
+  "name": "Cloud Outage Command Drill",
+  "schema_version": 1,
+  "slug": "cloud-outage-command-drill",
+  "version": "1.0.0"
+}

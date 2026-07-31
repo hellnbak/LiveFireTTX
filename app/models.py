@@ -16,7 +16,7 @@ from app.config import settings
 
 DB_PATH = settings.database_path
 GENERATED_ROOT = settings.generated_root
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 SCENARIO_LIBRARY: Dict[str, Dict[str, Any]] = {
@@ -200,6 +200,8 @@ class Exercise:
     paused_at: Optional[str] = None
     paused_seconds: int = 0
     completed_at: Optional[str] = None
+    scenario_pack_id: Optional[str] = None
+    organization_profile_id: Optional[str] = None
 
 
 @dataclass
@@ -248,6 +250,33 @@ class ImprovementAction:
     completed_at: Optional[str] = None
 
 
+@dataclass
+class ScenarioPack:
+    id: str
+    slug: str
+    name: str
+    version: str
+    description: str
+    base_scenario_type: str
+    definition: Dict[str, Any]
+    checksum: str
+    source: str
+    created_at: str
+
+
+@dataclass
+class OrganizationProfile:
+    id: str
+    slug: str
+    name: str
+    version: str
+    description: str
+    business_system: str
+    participants: List[str]
+    objectives: List[str]
+    created_at: str
+
+
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=5)
@@ -279,6 +308,7 @@ def init_db() -> None:
             2: _migration_2_trigger_count,
             3: _migration_3_facilitator_operations,
             4: _migration_4_exercise_operations,
+            5: _migration_5_portable_exercise_design,
         }
         for version, migration in migrations.items():
             if version in applied:
@@ -450,6 +480,97 @@ def _migration_4_exercise_operations(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_5_portable_exercise_design(conn: sqlite3.Connection) -> None:
+    exercise_columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(exercises)").fetchall()
+    }
+    exercise_additions = {
+        "scenario_pack_id": "TEXT",
+        "organization_profile_id": "TEXT",
+    }
+    for column, definition in exercise_additions.items():
+        if column not in exercise_columns:
+            conn.execute(f"ALTER TABLE exercises ADD COLUMN {column} {definition}")
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS scenario_packs (
+            id TEXT PRIMARY KEY,
+            slug TEXT NOT NULL,
+            name TEXT NOT NULL,
+            version TEXT NOT NULL,
+            description TEXT NOT NULL,
+            base_scenario_type TEXT NOT NULL,
+            definition TEXT NOT NULL,
+            checksum TEXT NOT NULL,
+            source TEXT NOT NULL CHECK(source IN ('builtin', 'exercise', 'import')),
+            created_at TEXT NOT NULL,
+            UNIQUE(slug, version)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_scenario_packs_library
+        ON scenario_packs(slug, created_at DESC)
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS organization_profiles (
+            id TEXT PRIMARY KEY,
+            slug TEXT NOT NULL,
+            name TEXT NOT NULL,
+            version TEXT NOT NULL,
+            description TEXT NOT NULL,
+            business_system TEXT NOT NULL,
+            participants TEXT NOT NULL,
+            objectives TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(slug, version)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_organization_profiles_library
+        ON organization_profiles(slug, created_at DESC)
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            display_name TEXT NOT NULL,
+            role TEXT NOT NULL
+                CHECK(role IN ('admin', 'facilitator', 'evaluator', 'participant')),
+            password_hash TEXT NOT NULL,
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS auth_sessions (
+            token_hash TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_auth_sessions_expiration
+        ON auth_sessions(expires_at)
+        """
+    )
+
+
 def database_schema_version() -> int:
     with connect() as conn:
         row = conn.execute(
@@ -506,6 +627,8 @@ def row_to_exercise(row: sqlite3.Row) -> Exercise:
         paused_at=row["paused_at"],
         paused_seconds=row["paused_seconds"],
         completed_at=row["completed_at"],
+        scenario_pack_id=row["scenario_pack_id"],
+        organization_profile_id=row["organization_profile_id"],
     )
 
 
@@ -558,6 +681,35 @@ def row_to_improvement_action(row: sqlite3.Row) -> ImprovementAction:
     )
 
 
+def row_to_scenario_pack(row: sqlite3.Row) -> ScenarioPack:
+    return ScenarioPack(
+        id=row["id"],
+        slug=row["slug"],
+        name=row["name"],
+        version=row["version"],
+        description=row["description"],
+        base_scenario_type=row["base_scenario_type"],
+        definition=json.loads(row["definition"]),
+        checksum=row["checksum"],
+        source=row["source"],
+        created_at=row["created_at"],
+    )
+
+
+def row_to_organization_profile(row: sqlite3.Row) -> OrganizationProfile:
+    return OrganizationProfile(
+        id=row["id"],
+        slug=row["slug"],
+        name=row["name"],
+        version=row["version"],
+        description=row["description"],
+        business_system=row["business_system"],
+        participants=json.loads(row["participants"]),
+        objectives=json.loads(row["objectives"]),
+        created_at=row["created_at"],
+    )
+
+
 def save_exercise(ex: Exercise) -> None:
     with connect() as conn:
         conn.execute(
@@ -578,8 +730,10 @@ def save_exercise(ex: Exercise) -> None:
                 started_at,
                 paused_at,
                 paused_seconds,
-                completed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                completed_at,
+                scenario_pack_id,
+                organization_profile_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 ex.id,
@@ -598,6 +752,8 @@ def save_exercise(ex: Exercise) -> None:
                 ex.paused_at,
                 ex.paused_seconds,
                 ex.completed_at,
+                ex.scenario_pack_id,
+                ex.organization_profile_id,
             ),
         )
         conn.commit()
@@ -1050,3 +1206,134 @@ def update_improvement_action_status(action_id: str, status: str) -> bool:
         )
         conn.commit()
     return cursor.rowcount == 1
+
+
+def save_scenario_pack(pack: ScenarioPack) -> None:
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO scenario_packs (
+                id,
+                slug,
+                name,
+                version,
+                description,
+                base_scenario_type,
+                definition,
+                checksum,
+                source,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                pack.id,
+                pack.slug,
+                pack.name,
+                pack.version,
+                pack.description,
+                pack.base_scenario_type,
+                json.dumps(pack.definition, sort_keys=True),
+                pack.checksum,
+                pack.source,
+                pack.created_at,
+            ),
+        )
+        conn.commit()
+
+
+def list_scenario_packs() -> List[ScenarioPack]:
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM scenario_packs
+            ORDER BY name COLLATE NOCASE, created_at DESC
+            """
+        ).fetchall()
+    return [row_to_scenario_pack(row) for row in rows]
+
+
+def get_scenario_pack(pack_id: str) -> Optional[ScenarioPack]:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM scenario_packs WHERE id = ?",
+            (pack_id,),
+        ).fetchone()
+    return row_to_scenario_pack(row) if row else None
+
+
+def find_scenario_pack(slug: str, version: str) -> Optional[ScenarioPack]:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM scenario_packs WHERE slug = ? AND version = ?",
+            (slug, version),
+        ).fetchone()
+    return row_to_scenario_pack(row) if row else None
+
+
+def save_organization_profile(profile: OrganizationProfile) -> None:
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO organization_profiles (
+                id,
+                slug,
+                name,
+                version,
+                description,
+                business_system,
+                participants,
+                objectives,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                profile.id,
+                profile.slug,
+                profile.name,
+                profile.version,
+                profile.description,
+                profile.business_system,
+                json.dumps(profile.participants),
+                json.dumps(profile.objectives),
+                profile.created_at,
+            ),
+        )
+        conn.commit()
+
+
+def list_organization_profiles() -> List[OrganizationProfile]:
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM organization_profiles
+            ORDER BY name COLLATE NOCASE, created_at DESC
+            """
+        ).fetchall()
+    return [row_to_organization_profile(row) for row in rows]
+
+
+def get_organization_profile(profile_id: str) -> Optional[OrganizationProfile]:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM organization_profiles WHERE id = ?",
+            (profile_id,),
+        ).fetchone()
+    return row_to_organization_profile(row) if row else None
+
+
+def find_organization_profile(
+    slug: str,
+    version: str,
+) -> Optional[OrganizationProfile]:
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT *
+            FROM organization_profiles
+            WHERE slug = ? AND version = ?
+            """,
+            (slug, version),
+        ).fetchone()
+    return row_to_organization_profile(row) if row else None

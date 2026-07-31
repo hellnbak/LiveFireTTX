@@ -16,7 +16,17 @@
       </div>
       <p>Safe, local-first exercise operations and chaos orchestration</p>
     </div>
-    <nav><a class="button" href="/new">New Exercise</a></nav>
+    {% set current_user = request.state.current_user if request is defined else none %}
+    {% if current_user %}
+      <nav class="header-nav">
+        {% if current_user.can('design') %}<a class="button" href="/library">Design Library</a><a class="button" href="/new">New Exercise</a>{% endif %}
+        {% if current_user.can('admin') and current_user.id != 'local' %}<a class="button" href="/admin/users">Users</a>{% endif %}
+        {% if current_user.id != 'local' %}
+          <span class="account-badge">{{ current_user.display_name }} · {{ current_user.role }}</span>
+          <form action="/logout" method="post"><button class="button" type="submit">Sign Out</button></form>
+        {% endif %}
+      </nav>
+    {% endif %}
   </header>
   <main>{% block content %}{% endblock %}</main>
 </body>

@@ -5,7 +5,7 @@
     <div>
       <h2>{{ exercise.name }}</h2>
       <p><strong>{{ exercise.scenario_type }}</strong> · {{ exercise.business_system }} · {{ exercise.platform }} · {{ exercise.duration_minutes }} minutes</p>
-      <p><code>{{ exercise.id }}</code> local exercise package</p>
+      <p><code>{{ exercise.id }}</code> local exercise package{% if exercise.scenario_pack_id %} · versioned scenario pack{% endif %}{% if exercise.organization_profile_id %} · organization profile applied{% endif %}</p>
     </div>
     <div class="actions">
       <a class="button primary" href="/exercises/{{ exercise.id }}/run">Run Exercise</a>
@@ -19,6 +19,20 @@
     </div>
   </div>
 </section>
+
+<details class="card wide design-capture">
+  <summary>Capture this design as a reusable scenario pack</summary>
+  <p class="muted">Runtime status, exercise IDs, generated paths, evidence, and trigger history are excluded. The reusable design keeps defaults, MSEL injects, safe action references, and evaluator checkpoints.</p>
+  <form action="/exercises/{{ exercise.id }}/scenario-pack" method="post" class="guided-form compact-form">
+    <div class="grid two">
+      <div class="control-field"><label for="pack-slug">Pack slug</label><input id="pack-slug" name="slug" placeholder="commerce-resilience" pattern="[a-z0-9][a-z0-9-]{1,63}" required></div>
+      <div class="control-field"><label for="pack-version">Version</label><input id="pack-version" name="version" value="1.0.0" required></div>
+      <div class="control-field"><label for="pack-name">Pack name</label><input id="pack-name" name="name" value="{{ exercise.name }}" maxlength="120" required></div>
+      <div class="control-field"><label for="pack-description">Description</label><input id="pack-description" name="description" value="Reusable design captured from {{ exercise.name }}" maxlength="1000" required></div>
+    </div>
+    <button class="button" type="submit">Save Immutable Pack Version</button>
+  </form>
+</details>
 
 <section class="card wide operations-panel">
   <div class="row between">

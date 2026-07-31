@@ -108,6 +108,7 @@ def create_safe_artifact_inject(
         payload={
             "artifact": str(relative_path),
             "artifact_kind": artifact_kind,
+            "content": content,
             "safe": True,
             "facilitator_defined": True,
         },

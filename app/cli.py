@@ -44,6 +44,9 @@ def main() -> int:
             "generated_root": str(settings.generated_root),
             "control_url": settings.control_url,
             "allow_container_host": settings.allow_container_host,
+            "shared_mode": settings.shared_mode,
+            "allowed_hosts": settings.allowed_hosts,
+            "secure_cookies": settings.secure_cookies,
         }
     elif args.command == "backup":
         destination = (

@@ -2,6 +2,43 @@
 
 All notable changes to LiveFireTTX are documented here.
 
+## 1.3.0 - 2026-07-31
+
+### Added
+
+- Portable scenario-pack schema with bounded JSON import, export, capture, and
+  one-click exercise instantiation
+- Immutable local scenario-pack versions with seeded built-in designs and
+  content checksums
+- Immutable organization-profile versions for reusable business systems,
+  participant roles, and objectives
+- Exercise provenance linking generated packages to their scenario pack and
+  organization profile
+- Opt-in shared deployment mode with administrator, facilitator, evaluator, and
+  participant route permissions
+- Server-side sessions, PBKDF2-SHA256 passwords, administrator account
+  management, secure-cookie controls, and explicit trusted-host configuration
+
+### Changed
+
+- SQLite schema version 5 persists design-library, profile, account, session,
+  and exercise-provenance records
+- Built-in scenarios are seeded into the versioned design library at startup
+- Guided setup can apply a reusable organization profile
+- Backups retain accounts but intentionally exclude active sessions
+
+### Security
+
+- Imported packs cannot choose arbitrary paths, scripts, targets, or actions;
+  chaos references must remain inside the base scenario allowlist
+- Non-loopback application hosts require shared mode, and shared mode defaults
+  to HTTPS-only session cookies
+- Authentication tokens are random, stored only as hashes, revocable, bounded
+  by expiration, and omitted from backups
+- Role enforcement occurs before route dispatch and keeps participant and
+  evaluator accounts outside facilitator, design, Docker, and administrator
+  controls
+
 ## 1.2.0 - 2026-07-31
 
 ### Added

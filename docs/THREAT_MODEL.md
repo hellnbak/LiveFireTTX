@@ -6,6 +6,7 @@
 - Generated target/controller packages and playbooks
 - Synthetic artifacts, run observations, and evidence archives
 - Local SQLite database and backups
+- Scenario packs, organization profiles, account hashes, and session records
 
 ## Trust Boundaries
 
@@ -15,6 +16,7 @@
 - Shared generated state and artifact volumes
 - Optional direct-host facilitator access to the local Docker CLI
 - Backup archives crossing the local filesystem boundary
+- Optional HTTPS reverse proxy to shared facilitator application boundary
 
 ## Primary Risks and Controls
 
@@ -64,17 +66,38 @@ clock data, and already-delivered narrative or artifact injects. It excludes
 future injects, schedules, chaos controls, facilitator notes, evaluations,
 package paths, and improvement actions.
 
+### Malicious or Oversized Scenario-Pack Import
+
+Controls: JSON-only import, 256 KB request bound, fixed schema version, field and
+count limits, semantic-version and slug validation, canonical normalization,
+immutable checksummed versions, supported base scenarios, package-contained
+artifact rules, and base-scenario chaos allowlists. Packs cannot provide code,
+commands, scripts, addresses, controller configuration, or filesystem paths.
+
+### Account or Session Compromise
+
+Controls: opt-in shared mode, explicit trusted hosts, exact same-origin mutation
+checks, PBKDF2-SHA256 password hashing with random salts, generic login errors,
+random opaque tokens stored only as hashes, fixed expiration, HttpOnly and
+SameSite Strict cookies, Secure cookies by shared-mode default, revocation on
+logout/password reset/disablement, last-administrator protection, and exclusion
+of active sessions from backups.
+
+Residual risks: LiveFireTTX does not provide MFA, external identity providers,
+account lockout, organization tenancy, or internet-edge protection. Use a
+controlled HTTPS exercise network and protective reverse proxy controls.
+
 ### Local Web Exposure
 
-Controls: documented localhost operation, container port binding to 127.0.0.1,
+Controls: default localhost operation, container port binding to 127.0.0.1,
 trusted-host validation, same-origin enforcement for state changes, defensive
-response headers, request identifiers, and no v1 remote-controller
-configuration. v1.2 does not claim multi-user authentication; operators must
-not expose the facilitator application to untrusted networks.
+response headers, request identifiers, no v1 remote-controller configuration,
+and opt-in authenticated shared mode. Non-loopback allowed hosts are rejected
+unless shared mode is enabled.
 
 ## Out of Scope
 
 - Production infrastructure fault injection
-- Internet-facing multi-user deployment
+- Public internet-facing or multi-tenant deployment
 - Malicious code execution or offensive security tooling
 - Cloud account authorization and organization tenancy

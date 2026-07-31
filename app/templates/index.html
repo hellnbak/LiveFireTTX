@@ -4,8 +4,8 @@
   <h2>Build scenario-specific live-fire TTX labs</h2>
   <p>Create a dependency-aware target environment, safe chaos control plane, unified MSEL, role-focused workspaces, and evidence-ready facilitator console.</p>
   <div class="actions">
-    <a class="button primary" href="/new">Create Exercise</a>
-    <a class="button" href="/admin/backup.zip">Download Local Backup</a>
+    {% if request.state.current_user.can('design') %}<a class="button primary" href="/new">Create Exercise</a><a class="button" href="/library">Open Design Library</a>{% endif %}
+    {% if request.state.current_user.can('admin') %}<a class="button" href="/admin/backup.zip">Download Local Backup</a>{% endif %}
   </div>
 </section>
 
@@ -22,7 +22,7 @@
       {% for ex in exercises %}
         <div class="mini">
           <div class="row between">
-            <a href="/exercises/{{ ex.id }}"><strong>{{ ex.name }}</strong></a>
+            {% if request.state.current_user.can('facilitate') %}<a href="/exercises/{{ ex.id }}"><strong>{{ ex.name }}</strong></a>{% elif request.state.current_user.can('evaluate') %}<a href="/exercises/{{ ex.id }}/evaluate"><strong>{{ ex.name }}</strong></a>{% else %}<a href="/exercises/{{ ex.id }}/present"><strong>{{ ex.name }}</strong></a>{% endif %}
             <span class="pill clock-status {{ ex.status }}">{{ ex.status|replace('_', ' ') }}</span>
           </div>
           <span>{{ ex.scenario_type }} · {{ ex.business_system }} · {{ ex.created_at }}</span>

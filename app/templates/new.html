@@ -51,6 +51,17 @@
 
     <input name="platform" type="hidden" value="local_docker">
 
+    {% if organization_profiles %}
+      <div class="control-field">
+        <label for="organization-profile">Organization profile</label>
+        <select id="organization-profile" name="organization_profile_id">
+          <option value="">Scenario defaults</option>
+          {% for profile in organization_profiles %}<option value="{{ profile.id }}">{{ profile.name }} · v{{ profile.version }}</option>{% endfor %}
+        </select>
+        <small class="muted">Selecting a profile applies its business system, roles, and objectives. You can still tailor the fields below.</small>
+      </div>
+    {% endif %}
+
     <div class="control-field">
       <div class="row between">
         <label for="participants">Participants, comma separated</label>
@@ -88,5 +99,6 @@
   </form>
 </section>
 <script id="scenario-catalog" type="application/json">{{ scenarios|tojson }}</script>
+<script id="organization-profiles" type="application/json">{{ organization_profile_catalog|tojson }}</script>
 <script src="/static/new.js?v={{ app_version }}" defer></script>
 {% endblock %}
